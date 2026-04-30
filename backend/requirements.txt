@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+langchain
+langchain-google-genai
+python-dotenv
+aiohttp>=3.11.0
