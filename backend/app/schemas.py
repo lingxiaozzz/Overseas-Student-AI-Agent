@@ -11,3 +11,7 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     answer: str
+
+
+class RagChatResponse(ChatResponse):
+    sources: list[str]

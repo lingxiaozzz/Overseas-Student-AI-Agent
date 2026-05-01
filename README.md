@@ -8,8 +8,9 @@ This first version is intentionally small:
 - `FastAPI` provides the web API.
 - `LangChain` connects the app to a Gemini chat model.
 - `/chat` accepts a student question and returns an AI answer.
+- `/rag-chat` retrieves relevant local knowledge base documents before answering.
 
-Later steps will add RAG, tools, memory, and LangGraph.
+Later steps will add tools, memory, and LangGraph.
 
 ## Project Structure
 
@@ -18,9 +19,12 @@ backend/
   app/
     main.py          # FastAPI app and API routes
     chat_service.py  # LangChain chat chain
+    rag_service.py   # LangChain RAG chain with FAISS
     config.py        # Environment variable loading
     schemas.py       # Request and response models
   requirements.txt
+data/
+  knowledge_base/    # Local markdown files used by RAG
 ```
 
 ## Setup
@@ -39,6 +43,7 @@ Create a `.env` file in the project root by copying `.env.example`, then add you
 ```text
 GOOGLE_API_KEY=your_real_google_ai_studio_api_key
 GEMINI_MODEL=gemini-2.5-flash
+GEMINI_EMBEDDING_MODEL=models/gemini-embedding-001
 ```
 
 You can create a Gemini API key from Google AI Studio:
@@ -68,3 +73,16 @@ Try the `POST /chat` endpoint with:
   "message": "I am a new international student at USYD. What should I prepare before arrival?"
 }
 ```
+
+Try the `POST /rag-chat` endpoint with:
+
+```json
+{
+  "message": "What should I prepare before arriving at USYD?"
+}
+```
+
+The RAG response includes:
+
+- `answer`: Gemini's answer grounded in the local knowledge base.
+- `sources`: the markdown files retrieved from `data/knowledge_base`.

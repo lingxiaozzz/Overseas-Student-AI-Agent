@@ -2,7 +2,8 @@ from fastapi import FastAPI, HTTPException, status
 
 from app.chat_service import MissingApiKeyError, generate_chat_response
 from app.config import settings
-from app.schemas import ChatRequest, ChatResponse
+from app.rag_service import KnowledgeBaseNotFoundError, generate_rag_response
+from app.schemas import ChatRequest, ChatResponse, RagChatResponse
 
 
 app = FastAPI(title=settings.app_name)
@@ -24,3 +25,21 @@ async def chat(request: ChatRequest) -> ChatResponse:
         ) from exc
 
     return ChatResponse(answer=answer)
+
+
+@app.post("/rag-chat", response_model=RagChatResponse)
+async def rag_chat(request: ChatRequest) -> RagChatResponse:
+    try:
+        answer, sources = await generate_rag_response(request.message)
+    except MissingApiKeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Set GOOGLE_API_KEY in your .env file before using /rag-chat.",
+        ) from exc
+    except KnowledgeBaseNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+
+    return RagChatResponse(answer=answer, sources=sources)
