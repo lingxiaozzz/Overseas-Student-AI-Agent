@@ -86,3 +86,4 @@ The RAG response includes:
 
 - `answer`: Gemini's answer grounded in the local knowledge base.
 - `sources`: the markdown files retrieved from `data/knowledge_base`.
+- `retrieved_contexts`: ranked snippets retrieved from FAISS, including source file, similarity score, and a short preview.

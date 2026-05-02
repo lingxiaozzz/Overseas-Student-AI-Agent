@@ -13,5 +13,13 @@ class ChatResponse(BaseModel):
     answer: str
 
 
+class RetrievedContext(BaseModel):
+    rank: int
+    source: str
+    score: float
+    content_preview: str
+
+
 class RagChatResponse(ChatResponse):
     sources: list[str]
+    retrieved_contexts: list[RetrievedContext]

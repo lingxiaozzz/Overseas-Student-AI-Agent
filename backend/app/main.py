@@ -30,7 +30,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
 @app.post("/rag-chat", response_model=RagChatResponse)
 async def rag_chat(request: ChatRequest) -> RagChatResponse:
     try:
-        answer, sources = await generate_rag_response(request.message)
+        answer, sources, retrieved_contexts = await generate_rag_response(request.message)
     except MissingApiKeyError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -42,4 +42,4 @@ async def rag_chat(request: ChatRequest) -> RagChatResponse:
             detail=str(exc),
         ) from exc
 
-    return RagChatResponse(answer=answer, sources=sources)
+    return RagChatResponse(answer=answer, sources=sources, retrieved_contexts=retrieved_contexts)

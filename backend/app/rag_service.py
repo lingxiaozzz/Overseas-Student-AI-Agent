@@ -8,6 +8,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.chat_service import MissingApiKeyError
 from app.config import settings
+from app.schemas import RetrievedContext
 
 
 RAG_SYSTEM_PROMPT = """You are an AI assistant for international students in Sydney.
@@ -89,13 +90,37 @@ def _format_context(documents: list[Document]) -> str:
     )
 
 
-async def generate_rag_response(message: str) -> tuple[str, list[str]]:
+def _preview_text(text: str, max_length: int = 350) -> str:
+    compact_text = " ".join(text.split())
+    if len(compact_text) <= max_length:
+        return compact_text
+
+    return f"{compact_text[:max_length].rstrip()}..."
+
+
+def _build_retrieved_contexts(
+    scored_documents: list[tuple[Document, float]],
+) -> list[RetrievedContext]:
+    return [
+        RetrievedContext(
+            rank=rank,
+            source=document.metadata.get("source", "unknown"),
+            score=float(score),
+            content_preview=_preview_text(document.page_content),
+        )
+        for rank, (document, score) in enumerate(scored_documents, start=1)
+    ]
+
+
+async def generate_rag_response(message: str) -> tuple[str, list[str], list[RetrievedContext]]:
     if not settings.google_api_key:
         raise MissingApiKeyError("GOOGLE_API_KEY is not set.")
 
     vector_store = _build_vector_store()
-    retrieved_documents = vector_store.similarity_search(message, k=3)
+    scored_documents = vector_store.similarity_search_with_score(message, k=3)
+    retrieved_documents = [document for document, _score in scored_documents]
     context = _format_context(retrieved_documents)
+    retrieved_contexts = _build_retrieved_contexts(scored_documents)
 
     prompt = ChatPromptTemplate.from_messages(
         [
@@ -113,6 +138,6 @@ async def generate_rag_response(message: str) -> tuple[str, list[str]]:
     sources = sorted({document.metadata.get("source", "unknown") for document in retrieved_documents})
 
     if isinstance(response.content, str):
-        return response.content, sources
+        return response.content, sources, retrieved_contexts
 
-    return str(response.content), sources
+    return str(response.content), sources, retrieved_contexts
