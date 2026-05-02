@@ -7,8 +7,10 @@ This first version is intentionally small:
 
 - `FastAPI` provides the web API.
 - `LangChain` connects the app to a Gemini chat model.
+- `LangGraph` routes user questions through a simple agent workflow.
 - `/chat` accepts a student question and returns an AI answer.
 - `/rag-chat` retrieves relevant local knowledge base documents before answering.
+- `/agent-chat` uses LangGraph to choose between direct chat and RAG.
 
 Later steps will add tools, memory, and LangGraph.
 
@@ -20,6 +22,7 @@ backend/
     main.py          # FastAPI app and API routes
     chat_service.py  # LangChain chat chain
     rag_service.py   # LangChain RAG chain with FAISS
+    graph_service.py # LangGraph route -> (chat|rag) workflow
     config.py        # Environment variable loading
     schemas.py       # Request and response models
   requirements.txt
@@ -87,3 +90,18 @@ The RAG response includes:
 - `answer`: Gemini's answer grounded in the local knowledge base.
 - `sources`: the markdown files retrieved from `data/knowledge_base`.
 - `retrieved_contexts`: ranked snippets retrieved from FAISS, including source file, similarity score, and a short preview.
+
+Try the `POST /agent-chat` endpoint with:
+
+```json
+{
+  "message": "I need help with USYD arrival checklist and OSHC."
+}
+```
+
+The agent response includes:
+
+- `route`: `chat` or `rag`, selected by LangGraph route node.
+- `answer`: final answer from the selected route.
+- `sources`: retrieved files (empty for direct chat).
+- `retrieved_contexts`: retrieved ranked snippets (empty for direct chat).

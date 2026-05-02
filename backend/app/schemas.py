@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field
+from typing import Literal
 
 
 class ChatRequest(BaseModel):
@@ -23,3 +24,7 @@ class RetrievedContext(BaseModel):
 class RagChatResponse(ChatResponse):
     sources: list[str]
     retrieved_contexts: list[RetrievedContext]
+
+
+class AgentChatResponse(RagChatResponse):
+    route: Literal["chat", "rag"]

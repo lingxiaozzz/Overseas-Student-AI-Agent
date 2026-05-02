@@ -1,0 +1,94 @@
+from functools import lru_cache
+from typing import Literal, TypedDict
+
+from langgraph.graph import END, StateGraph
+
+from app.chat_service import generate_chat_response
+from app.rag_service import generate_rag_response
+from app.schemas import RetrievedContext
+
+Route = Literal["chat", "rag"]
+
+RAG_HINT_KEYWORDS = {
+    "usyd",
+    "visa",
+    "oshc",
+    "accommodation",
+    "arrival",
+    "rent",
+    "suburb",
+    "campus",
+    "orientation",
+    "enrolment",
+    "student health cover",
+}
+
+
+class AgentState(TypedDict, total=False):
+    message: str
+    route: Route
+    answer: str
+    sources: list[str]
+    retrieved_contexts: list[RetrievedContext]
+
+
+def _choose_route(message: str) -> Route:
+    message_lower = message.lower()
+    if any(keyword in message_lower for keyword in RAG_HINT_KEYWORDS):
+        return "rag"
+
+    return "chat"
+
+
+async def _route_node(state: AgentState) -> AgentState:
+    return {"route": _choose_route(state["message"])}
+
+
+async def _chat_node(state: AgentState) -> AgentState:
+    answer = await generate_chat_response(state["message"])
+    return {
+        "answer": answer,
+        "sources": [],
+        "retrieved_contexts": [],
+    }
+
+
+async def _rag_node(state: AgentState) -> AgentState:
+    answer, sources, retrieved_contexts = await generate_rag_response(state["message"])
+    return {
+        "answer": answer,
+        "sources": sources,
+        "retrieved_contexts": retrieved_contexts,
+    }
+
+
+def _route_decision(state: AgentState) -> Route:
+    return state["route"]
+
+
+@lru_cache(maxsize=1)
+def _build_agent_graph():
+    graph = StateGraph(AgentState)
+    graph.add_node("route", _route_node)
+    graph.add_node("chat", _chat_node)
+    graph.add_node("rag", _rag_node)
+
+    graph.set_entry_point("route")
+    graph.add_conditional_edges(
+        "route",
+        _route_decision,
+        {
+            "chat": "chat",
+            "rag": "rag",
+        },
+    )
+    graph.add_edge("chat", END)
+    graph.add_edge("rag", END)
+
+    return graph.compile()
+
+
+async def run_agent_workflow(message: str) -> AgentState:
+    graph = _build_agent_graph()
+    result = await graph.ainvoke({"message": message})
+    return result
