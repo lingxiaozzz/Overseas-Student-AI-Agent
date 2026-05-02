@@ -10,7 +10,8 @@ from app.config import settings
 
 TOOL_SYSTEM_PROMPT = """You are an AI assistant for international students in Sydney.
 Use available tools when the user asks for calculations, budgeting, or checklist-style planning.
-If a tool is needed, call it with reasonable assumptions and explain those assumptions clearly."""
+If a tool is needed, call it with reasonable assumptions and explain those assumptions clearly.
+Use prior conversation history if relevant to the latest user request."""
 
 
 @tool
@@ -83,11 +84,11 @@ def _to_text(content: Any) -> str:
     return str(content)
 
 
-async def generate_tool_response(message: str) -> tuple[str, list[str]]:
+async def generate_tool_response(message: str, chat_history: str = "") -> tuple[str, list[str]]:
     model = _create_tool_model().bind_tools(TOOLS)
     messages = [
         SystemMessage(content=TOOL_SYSTEM_PROMPT),
-        HumanMessage(content=message),
+        HumanMessage(content=f"Conversation history:\n{chat_history}\n\nCurrent user message:\n{message}"),
     ]
     first_response = await model.ainvoke(messages)
     tool_calls = first_response.tool_calls or []

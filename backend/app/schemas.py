@@ -8,6 +8,12 @@ class ChatRequest(BaseModel):
         min_length=1,
         examples=["I am a new international student at USYD. What should I prepare before arrival?"],
     )
+    session_id: str = Field(
+        default="default",
+        min_length=1,
+        examples=["student-001"],
+        description="Conversation session identifier for short-term memory.",
+    )
 
 
 class ChatResponse(BaseModel):

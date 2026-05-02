@@ -11,7 +11,8 @@ This first version is intentionally small:
 - `/chat` accepts a student question and returns an AI answer.
 - `/rag-chat` retrieves relevant local knowledge base documents before answering.
 - `/tool-chat` enables tool calling for budgeting and checklist tasks.
-- `/agent-chat` uses LangGraph to choose between direct chat and RAG.
+- `/agent-chat` uses LangGraph to choose between direct chat, RAG, and tool calling.
+- Short-term memory keeps recent turns per `session_id` across endpoints.
 
 Later steps will add tools, memory, and LangGraph.
 
@@ -25,6 +26,7 @@ backend/
     rag_service.py   # LangChain RAG chain with FAISS
     tool_service.py  # LangChain tool calling service
     graph_service.py # LangGraph route -> (chat|rag|tool) workflow
+    memory_service.py # In-memory conversation history by session_id
     config.py        # Environment variable loading
     schemas.py       # Request and response models
   requirements.txt
@@ -49,6 +51,7 @@ Create a `.env` file in the project root by copying `.env.example`, then add you
 GOOGLE_API_KEY=your_real_google_ai_studio_api_key
 GEMINI_MODEL=gemini-2.5-flash
 GEMINI_EMBEDDING_MODEL=models/gemini-embedding-001
+MEMORY_MAX_TURNS=6
 ```
 
 You can create a Gemini API key from Google AI Studio:
@@ -75,7 +78,8 @@ Try the `POST /chat` endpoint with:
 
 ```json
 {
-  "message": "I am a new international student at USYD. What should I prepare before arrival?"
+  "message": "I am a new international student at USYD. What should I prepare before arrival?",
+  "session_id": "student-001"
 }
 ```
 
@@ -83,7 +87,8 @@ Try the `POST /rag-chat` endpoint with:
 
 ```json
 {
-  "message": "What should I prepare before arriving at USYD?"
+  "message": "What should I prepare before arriving at USYD?",
+  "session_id": "student-001"
 }
 ```
 
@@ -97,7 +102,8 @@ Try the `POST /agent-chat` endpoint with:
 
 ```json
 {
-  "message": "I need help with USYD arrival checklist and OSHC."
+  "message": "I need help with USYD arrival checklist and OSHC.",
+  "session_id": "student-001"
 }
 ```
 
@@ -113,7 +119,8 @@ Try the `POST /tool-chat` endpoint with:
 
 ```json
 {
-  "message": "My rent is 420 AUD per week, can you estimate my weekly budget?"
+  "message": "My rent is 420 AUD per week, can you estimate my weekly budget?",
+  "session_id": "student-001"
 }
 ```
 
@@ -121,3 +128,9 @@ Tool chat response includes:
 
 - `answer`: final LLM response after tool execution.
 - `used_tools`: list of executed tools, such as `estimate_weekly_budget`.
+
+Memory behavior:
+
+- Use the same `session_id` to keep conversation continuity across `/chat`, `/rag-chat`, `/tool-chat`, and `/agent-chat`.
+- Recent turns are stored in memory only (server runtime), not persisted to database.
+- `MEMORY_MAX_TURNS` controls how many recent user-assistant turns are retained per session.

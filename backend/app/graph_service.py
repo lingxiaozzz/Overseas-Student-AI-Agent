@@ -37,6 +37,7 @@ TOOL_HINT_KEYWORDS = {
 
 class AgentState(TypedDict, total=False):
     message: str
+    chat_history: str
     route: Route
     answer: str
     sources: list[str]
@@ -59,7 +60,7 @@ async def _route_node(state: AgentState) -> AgentState:
 
 
 async def _chat_node(state: AgentState) -> AgentState:
-    answer = await generate_chat_response(state["message"])
+    answer = await generate_chat_response(state["message"], chat_history=state.get("chat_history", ""))
     return {
         "answer": answer,
         "sources": [],
@@ -69,7 +70,10 @@ async def _chat_node(state: AgentState) -> AgentState:
 
 
 async def _rag_node(state: AgentState) -> AgentState:
-    answer, sources, retrieved_contexts = await generate_rag_response(state["message"])
+    answer, sources, retrieved_contexts = await generate_rag_response(
+        state["message"],
+        chat_history=state.get("chat_history", ""),
+    )
     return {
         "answer": answer,
         "sources": sources,
@@ -79,7 +83,10 @@ async def _rag_node(state: AgentState) -> AgentState:
 
 
 async def _tool_node(state: AgentState) -> AgentState:
-    answer, used_tools = await generate_tool_response(state["message"])
+    answer, used_tools = await generate_tool_response(
+        state["message"],
+        chat_history=state.get("chat_history", ""),
+    )
     return {
         "answer": answer,
         "sources": [],
@@ -117,7 +124,7 @@ def _build_agent_graph():
     return graph.compile()
 
 
-async def run_agent_workflow(message: str) -> AgentState:
+async def run_agent_workflow(message: str, chat_history: str = "") -> AgentState:
     graph = _build_agent_graph()
-    result = await graph.ainvoke({"message": message})
+    result = await graph.ainvoke({"message": message, "chat_history": chat_history})
     return result

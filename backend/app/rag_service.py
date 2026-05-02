@@ -14,7 +14,8 @@ from app.schemas import RetrievedContext
 RAG_SYSTEM_PROMPT = """You are an AI assistant for international students in Sydney.
 Answer using the provided knowledge base context first.
 If the context does not contain enough information, say what is missing and give cautious general guidance.
-Always remind users to verify visa, enrolment, health cover, and legal requirements with official sources."""
+Always remind users to verify visa, enrolment, health cover, and legal requirements with official sources.
+Use prior conversation history when it helps maintain continuity."""
 
 
 class KnowledgeBaseNotFoundError(RuntimeError):
@@ -112,7 +113,9 @@ def _build_retrieved_contexts(
     ]
 
 
-async def generate_rag_response(message: str) -> tuple[str, list[str], list[RetrievedContext]]:
+async def generate_rag_response(
+    message: str, chat_history: str = ""
+) -> tuple[str, list[str], list[RetrievedContext]]:
     if not settings.google_api_key:
         raise MissingApiKeyError("GOOGLE_API_KEY is not set.")
 
@@ -125,7 +128,10 @@ async def generate_rag_response(message: str) -> tuple[str, list[str], list[Retr
     prompt = ChatPromptTemplate.from_messages(
         [
             ("system", RAG_SYSTEM_PROMPT),
-            ("human", "Question:\n{message}\n\nKnowledge base context:\n{context}"),
+            (
+                "human",
+                "Conversation history:\n{chat_history}\n\nQuestion:\n{message}\n\nKnowledge base context:\n{context}",
+            ),
         ]
     )
     model = ChatGoogleGenerativeAI(
@@ -134,7 +140,9 @@ async def generate_rag_response(message: str) -> tuple[str, list[str], list[Retr
         temperature=0.2,
     )
     chain = prompt | model
-    response = await chain.ainvoke({"message": message, "context": context})
+    response = await chain.ainvoke(
+        {"message": message, "context": context, "chat_history": chat_history}
+    )
     sources = sorted({document.metadata.get("source", "unknown") for document in retrieved_documents})
 
     if isinstance(response.content, str):
