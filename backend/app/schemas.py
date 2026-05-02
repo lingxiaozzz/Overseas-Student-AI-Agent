@@ -26,5 +26,10 @@ class RagChatResponse(ChatResponse):
     retrieved_contexts: list[RetrievedContext]
 
 
+class ToolChatResponse(ChatResponse):
+    used_tools: list[str]
+
+
 class AgentChatResponse(RagChatResponse):
-    route: Literal["chat", "rag"]
+    route: Literal["chat", "rag", "tool"]
+    used_tools: list[str]

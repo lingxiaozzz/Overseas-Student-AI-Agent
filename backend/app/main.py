@@ -4,7 +4,8 @@ from app.chat_service import MissingApiKeyError, generate_chat_response
 from app.config import settings
 from app.graph_service import run_agent_workflow
 from app.rag_service import KnowledgeBaseNotFoundError, generate_rag_response
-from app.schemas import AgentChatResponse, ChatRequest, ChatResponse, RagChatResponse
+from app.schemas import AgentChatResponse, ChatRequest, ChatResponse, RagChatResponse, ToolChatResponse
+from app.tool_service import generate_tool_response
 
 
 app = FastAPI(title=settings.app_name)
@@ -46,6 +47,19 @@ async def rag_chat(request: ChatRequest) -> RagChatResponse:
     return RagChatResponse(answer=answer, sources=sources, retrieved_contexts=retrieved_contexts)
 
 
+@app.post("/tool-chat", response_model=ToolChatResponse)
+async def tool_chat(request: ChatRequest) -> ToolChatResponse:
+    try:
+        answer, used_tools = await generate_tool_response(request.message)
+    except MissingApiKeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Set GOOGLE_API_KEY in your .env file before using /tool-chat.",
+        ) from exc
+
+    return ToolChatResponse(answer=answer, used_tools=used_tools)
+
+
 @app.post("/agent-chat", response_model=AgentChatResponse)
 async def agent_chat(request: ChatRequest) -> AgentChatResponse:
     try:
@@ -66,4 +80,5 @@ async def agent_chat(request: ChatRequest) -> AgentChatResponse:
         route=result["route"],
         sources=result["sources"],
         retrieved_contexts=result["retrieved_contexts"],
+        used_tools=result["used_tools"],
     )
