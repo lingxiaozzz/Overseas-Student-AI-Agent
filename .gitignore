@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Evaluation report artifacts
+backend/eval/reports/*.json
