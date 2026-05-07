@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from app.chat_service import MissingApiKeyError, generate_chat_response
 from app.config import settings
+from app.logging_service import get_logger
 from app.rag_service import generate_rag_response
 from app.schemas import RetrievedContext
 from app.retry_service import with_retry
@@ -48,6 +49,8 @@ Return strict JSON with:
 - route: one of chat, rag, tool
 - reason: one short sentence explaining the routing choice."""
 
+logger = get_logger(__name__)
+
 
 class RouterDecision(BaseModel):
     route: Route
@@ -57,6 +60,7 @@ class RouterDecision(BaseModel):
 class AgentState(TypedDict, total=False):
     message: str
     chat_history: str
+    trace_id: str
     route: Route
     router_reason: str
     answer: str
@@ -99,11 +103,18 @@ async def _llm_route(message: str, chat_history: str) -> RouterDecision:
 async def _route_node(state: AgentState) -> AgentState:
     message = state["message"]
     chat_history = state.get("chat_history", "")
+    trace_id = state.get("trace_id", "n/a")
     try:
         decision = await _llm_route(message, chat_history)
+        logger.trace(
+            f"trace_id={trace_id} route_decision={decision.route} reason={decision.reason}"
+        )
         return {"route": decision.route, "router_reason": decision.reason}
     except Exception:
         fallback_route = _keyword_route(message)
+        logger.warning(
+            f"trace_id={trace_id} route_fallback={fallback_route} reason=llm_router_unavailable"
+        )
         return {
             "route": fallback_route,
             "router_reason": "Fallback keyword router used because LLM routing was unavailable.",
@@ -175,7 +186,7 @@ def _build_agent_graph():
     return graph.compile()
 
 
-async def run_agent_workflow(message: str, chat_history: str = "") -> AgentState:
+async def run_agent_workflow(message: str, chat_history: str = "", trace_id: str = "n/a") -> AgentState:
     graph = _build_agent_graph()
-    result = await graph.ainvoke({"message": message, "chat_history": chat_history})
+    result = await graph.ainvoke({"message": message, "chat_history": chat_history, "trace_id": trace_id})
     return result

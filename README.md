@@ -55,6 +55,7 @@ MEMORY_MAX_TURNS=6
 RETRY_MAX_ATTEMPTS=3
 RETRY_INITIAL_SECONDS=1.0
 RETRY_MAX_SECONDS=8.0
+LOG_LEVEL=INFO
 ```
 
 You can create a Gemini API key from Google AI Studio:
@@ -143,6 +144,12 @@ Retry behavior:
 
 - The backend retries transient Gemini errors (e.g. 429/503) with exponential backoff.
 - Control retries via `RETRY_MAX_ATTEMPTS`, `RETRY_INITIAL_SECONDS`, and `RETRY_MAX_SECONDS`.
+
+Trace-level logging:
+
+- The backend logs `trace_id`, selected route, tool usage, retrieval counts, and request latency.
+- Set `LOG_LEVEL=TRACE` for verbose routing traces.
+- Pass `x-trace-id` header to correlate client and server logs (backend auto-generates one if missing).
 
 ## Route Evaluation
 
