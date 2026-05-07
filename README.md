@@ -135,3 +135,28 @@ Memory behavior:
 - Use the same `session_id` to keep conversation continuity across `/chat`, `/rag-chat`, `/tool-chat`, and `/agent-chat`.
 - Recent turns are stored in memory only (server runtime), not persisted to database.
 - `MEMORY_MAX_TURNS` controls how many recent user-assistant turns are retained per session.
+
+## Route Evaluation
+
+You can evaluate agent route accuracy (`chat` / `rag` / `tool`) with a built-in script.
+
+1) Start the backend:
+
+```powershell
+cd backend
+uvicorn app.main:app --reload
+```
+
+2) In another terminal, run:
+
+```powershell
+cd backend
+python eval/route_eval.py --base-url http://127.0.0.1:8000
+```
+
+The script prints:
+
+- total test cases
+- route accuracy
+- confusion matrix (`expected -> predicted`)
+- mismatch examples with `router_reason`
