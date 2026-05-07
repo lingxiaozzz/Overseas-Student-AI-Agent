@@ -21,6 +21,9 @@ class Settings:
     gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     embedding_model: str = os.getenv("GEMINI_EMBEDDING_MODEL", "models/gemini-embedding-001")
     memory_max_turns: int = int(os.getenv("MEMORY_MAX_TURNS", "6"))
+    retry_max_attempts: int = int(os.getenv("RETRY_MAX_ATTEMPTS", "3"))
+    retry_initial_seconds: float = float(os.getenv("RETRY_INITIAL_SECONDS", "1.0"))
+    retry_max_seconds: float = float(os.getenv("RETRY_MAX_SECONDS", "8.0"))
     knowledge_base_path: Path = PROJECT_ROOT / "data" / "knowledge_base"
 
 

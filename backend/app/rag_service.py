@@ -8,6 +8,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.chat_service import MissingApiKeyError
 from app.config import settings
+from app.retry_service import with_retry
 from app.schemas import RetrievedContext
 
 
@@ -140,8 +141,8 @@ async def generate_rag_response(
         temperature=0.2,
     )
     chain = prompt | model
-    response = await chain.ainvoke(
-        {"message": message, "context": context, "chat_history": chat_history}
+    response = await with_retry(
+        lambda: chain.ainvoke({"message": message, "context": context, "chat_history": chat_history})
     )
     sources = sorted({document.metadata.get("source", "unknown") for document in retrieved_documents})
 

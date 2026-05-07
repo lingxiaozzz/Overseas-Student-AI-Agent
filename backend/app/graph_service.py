@@ -10,6 +10,7 @@ from app.chat_service import MissingApiKeyError, generate_chat_response
 from app.config import settings
 from app.rag_service import generate_rag_response
 from app.schemas import RetrievedContext
+from app.retry_service import with_retry
 from app.tool_service import generate_tool_response
 
 Route = Literal["chat", "rag", "tool"]
@@ -35,14 +36,13 @@ TOOL_HINT_KEYWORDS = {
     "estimat",
     "how much",
     "checklist",
-    "plan",
 }
 
 ROUTER_PROMPT = """You are a routing controller for an international student assistant.
 Choose exactly one route:
 - chat: general questions that do not require local knowledge base or tool execution.
 - rag: questions about USYD/student visa/OSHC/accommodation/arrival that should use the local knowledge base.
-- tool: user asks for numeric calculations, budgeting, checklist generation, or actionable planning suitable for tools.
+- tool: user asks for numeric calculations, budgeting, or checklist generation that directly map to available tools.
 
 Return strict JSON with:
 - route: one of chat, rag, tool
@@ -93,7 +93,7 @@ async def _llm_route(message: str, chat_history: str) -> RouterDecision:
         temperature=0,
     ).with_structured_output(RouterDecision)
     chain = prompt | model
-    return await chain.ainvoke({"message": message, "chat_history": chat_history})
+    return await with_retry(lambda: chain.ainvoke({"message": message, "chat_history": chat_history}))
 
 
 async def _route_node(state: AgentState) -> AgentState:

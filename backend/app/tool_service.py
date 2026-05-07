@@ -6,6 +6,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 from app.chat_service import MissingApiKeyError
 from app.config import settings
+from app.retry_service import with_retry
 
 
 TOOL_SYSTEM_PROMPT = """You are an AI assistant for international students in Sydney.
@@ -90,7 +91,7 @@ async def generate_tool_response(message: str, chat_history: str = "") -> tuple[
         SystemMessage(content=TOOL_SYSTEM_PROMPT),
         HumanMessage(content=f"Conversation history:\n{chat_history}\n\nCurrent user message:\n{message}"),
     ]
-    first_response = await model.ainvoke(messages)
+    first_response = await with_retry(lambda: model.ainvoke(messages))
     tool_calls = first_response.tool_calls or []
 
     if not tool_calls:
@@ -115,5 +116,5 @@ async def generate_tool_response(message: str, chat_history: str = "") -> tuple[
             )
         )
 
-    final_response = await model.ainvoke([*messages, first_response, *tool_messages])
+    final_response = await with_retry(lambda: model.ainvoke([*messages, first_response, *tool_messages]))
     return _to_text(final_response.content), used_tools

@@ -3,6 +3,8 @@ import json
 import urllib.error
 import urllib.request
 from collections import Counter, defaultdict
+from datetime import datetime, timezone
+from pathlib import Path
 
 
 TEST_CASES = [
@@ -49,6 +51,16 @@ def main() -> None:
         default="route-eval",
         help="Prefix used for session_id during evaluation.",
     )
+    parser.add_argument(
+        "--output-dir",
+        default="eval/reports",
+        help="Directory for writing JSON evaluation reports.",
+    )
+    parser.add_argument(
+        "--output-prefix",
+        default="route-eval",
+        help="File prefix for timestamped report.",
+    )
     args = parser.parse_args()
 
     endpoint = f"{args.base_url.rstrip('/')}/agent-chat"
@@ -80,6 +92,15 @@ def main() -> None:
 
     total = len(TEST_CASES)
     accuracy = correct / total if total else 0.0
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%SZ")
+
+    ordered_routes = ["chat", "rag", "tool", "unknown"]
+    confusion_dict: dict[str, dict[str, int]] = {}
+    for expected in ordered_routes:
+        row = confusion.get(expected, Counter())
+        if not row:
+            continue
+        confusion_dict[expected] = {pred: int(row[pred]) for pred in ordered_routes if row[pred] > 0}
 
     print("Route Evaluation Summary")
     print(f"- Total cases: {total}")
@@ -88,7 +109,6 @@ def main() -> None:
     print("")
 
     print("Confusion Matrix (expected -> predicted count)")
-    ordered_routes = ["chat", "rag", "tool", "unknown"]
     for expected in ordered_routes:
         row = confusion.get(expected, Counter())
         if not row:
@@ -107,6 +127,26 @@ def main() -> None:
             print(f"  message={mismatch['message']}")
     else:
         print("No mismatches found.")
+
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    timestamped_path = output_dir / f"{args.output_prefix}-{timestamp}.json"
+    latest_path = output_dir / "latest.json"
+    report = {
+        "generated_at_utc": timestamp,
+        "base_url": args.base_url,
+        "total_cases": total,
+        "correct": correct,
+        "accuracy": accuracy,
+        "confusion_matrix": confusion_dict,
+        "mismatches": mismatches,
+        "cases": TEST_CASES,
+    }
+    timestamped_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    latest_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    print("")
+    print(f"Report saved: {timestamped_path}")
+    print(f"Latest report: {latest_path}")
 
 
 if __name__ == "__main__":

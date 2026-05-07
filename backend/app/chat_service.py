@@ -2,6 +2,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from app.config import settings
+from app.retry_service import with_retry
 
 
 SYSTEM_PROMPT = """You are an AI assistant for international students in Sydney.
@@ -31,7 +32,7 @@ async def generate_chat_response(message: str, chat_history: str = "") -> str:
         temperature=0.2,
     )
     chain = prompt | model
-    response = await chain.ainvoke({"message": message, "chat_history": chat_history})
+    response = await with_retry(lambda: chain.ainvoke({"message": message, "chat_history": chat_history}))
 
     if isinstance(response.content, str):
         return response.content

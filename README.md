@@ -52,6 +52,9 @@ GOOGLE_API_KEY=your_real_google_ai_studio_api_key
 GEMINI_MODEL=gemini-2.5-flash
 GEMINI_EMBEDDING_MODEL=models/gemini-embedding-001
 MEMORY_MAX_TURNS=6
+RETRY_MAX_ATTEMPTS=3
+RETRY_INITIAL_SECONDS=1.0
+RETRY_MAX_SECONDS=8.0
 ```
 
 You can create a Gemini API key from Google AI Studio:
@@ -136,6 +139,11 @@ Memory behavior:
 - Recent turns are stored in memory only (server runtime), not persisted to database.
 - `MEMORY_MAX_TURNS` controls how many recent user-assistant turns are retained per session.
 
+Retry behavior:
+
+- The backend retries transient Gemini errors (e.g. 429/503) with exponential backoff.
+- Control retries via `RETRY_MAX_ATTEMPTS`, `RETRY_INITIAL_SECONDS`, and `RETRY_MAX_SECONDS`.
+
 ## Route Evaluation
 
 You can evaluate agent route accuracy (`chat` / `rag` / `tool`) with a built-in script.
@@ -154,9 +162,18 @@ cd backend
 python eval/route_eval.py --base-url http://127.0.0.1:8000
 ```
 
+Optional: customize output location/prefix:
+
+```powershell
+python eval/route_eval.py --base-url http://127.0.0.1:8000 --output-dir eval/reports --output-prefix route-eval
+```
+
 The script prints:
 
 - total test cases
 - route accuracy
 - confusion matrix (`expected -> predicted`)
 - mismatch examples with `router_reason`
+- JSON report files:
+  - `eval/reports/route-eval-<timestamp>.json`
+  - `eval/reports/latest.json`
