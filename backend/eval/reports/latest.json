@@ -1,0 +1,77 @@
+{
+  "generated_at_utc": "20260507-103657Z",
+  "base_url": "http://127.0.0.1:8000",
+  "total_cases": 12,
+  "correct": 11,
+  "accuracy": 0.9166666666666666,
+  "confusion_matrix": {
+    "chat": {
+      "chat": 3,
+      "tool": 1
+    },
+    "rag": {
+      "rag": 4
+    },
+    "tool": {
+      "tool": 4
+    }
+  },
+  "mismatches": [
+    {
+      "message": "Give me a weekly study plan for exams.",
+      "expected": "chat",
+      "predicted": "tool",
+      "router_reason": "The user is asking for a study plan, which involves generating a checklist or structured plan, aligning with the tool's capability."
+    }
+  ],
+  "cases": [
+    {
+      "message": "I am a new USYD student. What should I prepare before arrival?",
+      "expected_route": "rag"
+    },
+    {
+      "message": "Do I need OSHC before applying for my visa?",
+      "expected_route": "rag"
+    },
+    {
+      "message": "Accommodation tips near USYD campus for first month.",
+      "expected_route": "rag"
+    },
+    {
+      "message": "What documents should I bring for enrolment at USYD?",
+      "expected_route": "rag"
+    },
+    {
+      "message": "Can you estimate my weekly budget if rent is 420 AUD?",
+      "expected_route": "tool"
+    },
+    {
+      "message": "Calculate my weekly cost with rent 500, groceries 140, transport 60.",
+      "expected_route": "tool"
+    },
+    {
+      "message": "Build me a pre-arrival checklist if I already have visa and OSHC.",
+      "expected_route": "tool"
+    },
+    {
+      "message": "How much should I budget weekly in Sydney as a student?",
+      "expected_route": "tool"
+    },
+    {
+      "message": "How can I improve time management for study?",
+      "expected_route": "chat"
+    },
+    {
+      "message": "I feel homesick. Any coping tips?",
+      "expected_route": "chat"
+    },
+    {
+      "message": "Explain the Pomodoro method in simple words.",
+      "expected_route": "chat"
+    },
+    {
+      "message": "Give me a weekly study plan for exams.",
+      "expected_route": "chat"
+    }
+  ]
+}

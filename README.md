@@ -147,6 +147,13 @@ Retry behavior:
 ## Route Evaluation
 
 You can evaluate agent route accuracy (`chat` / `rag` / `tool`) with a built-in script.
+The dataset now includes:
+
+- single-turn
+- multi-turn
+- ambiguous intent
+- adversarial queries
+- edge cases
 
 1) Start the backend:
 
@@ -171,7 +178,9 @@ python eval/route_eval.py --base-url http://127.0.0.1:8000 --output-dir eval/rep
 The script prints:
 
 - total test cases
+- total evaluated turns (for multi-turn threads)
 - route accuracy
+- per-category metrics
 - confusion matrix (`expected -> predicted`)
 - mismatch examples with `router_reason`
 - JSON report files:
