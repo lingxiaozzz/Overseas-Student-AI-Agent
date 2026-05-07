@@ -38,4 +38,5 @@ class ToolChatResponse(ChatResponse):
 
 class AgentChatResponse(RagChatResponse):
     route: Literal["chat", "rag", "tool"]
+    router_reason: str
     used_tools: list[str]

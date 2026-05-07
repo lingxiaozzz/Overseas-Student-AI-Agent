@@ -11,7 +11,7 @@ This first version is intentionally small:
 - `/chat` accepts a student question and returns an AI answer.
 - `/rag-chat` retrieves relevant local knowledge base documents before answering.
 - `/tool-chat` enables tool calling for budgeting and checklist tasks.
-- `/agent-chat` uses LangGraph to choose between direct chat, RAG, and tool calling.
+- `/agent-chat` uses LangGraph with an LLM router (and keyword fallback) to choose between direct chat, RAG, and tool calling.
 - Short-term memory keeps recent turns per `session_id` across endpoints.
 
 Later steps will add tools, memory, and LangGraph.
@@ -110,6 +110,7 @@ Try the `POST /agent-chat` endpoint with:
 The agent response includes:
 
 - `route`: `chat`, `rag`, or `tool`, selected by LangGraph route node.
+- `router_reason`: short explanation from router about why that route was selected.
 - `answer`: final answer from the selected route.
 - `sources`: retrieved files (empty for direct chat).
 - `retrieved_contexts`: retrieved ranked snippets (empty for direct chat).

@@ -90,6 +90,7 @@ async def agent_chat(request: ChatRequest) -> AgentChatResponse:
     return AgentChatResponse(
         answer=result["answer"],
         route=result["route"],
+        router_reason=result["router_reason"],
         sources=result["sources"],
         retrieved_contexts=result["retrieved_contexts"],
         used_tools=result["used_tools"],
