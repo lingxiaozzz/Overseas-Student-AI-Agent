@@ -45,6 +45,18 @@ Choose exactly one route:
 - rag: questions about USYD/student visa/OSHC/accommodation/arrival that should use the local knowledge base.
 - tool: user asks for numeric calculations, budgeting, or checklist generation that directly map to available tools.
 
+State-machine policy (must follow):
+1) If user only provides background facts and no explicit task request, route to chat.
+2) Do not route to tool only because the message contains numbers.
+3) Do not route to rag only because the message mentions a school/entity.
+4) If user asks for potentially harmful or policy-bypass advice (e.g., fake visa shortcuts), route to rag so the assistant can ground response in official guidance.
+5) For ambiguous planning requests tied to student onboarding in Sydney/USYD, prefer rag first.
+
+Few-shot routing examples:
+- "My rent is 450 AUD." -> chat (background statement, no calculation request)
+- "USYD thing" -> rag (entity-specific factual lookup likely needed)
+- "Help me pls" -> chat (intent too vague, needs clarification)
+
 Return strict JSON with:
 - route: one of chat, rag, tool
 - reason: one short sentence explaining the routing choice."""
@@ -69,8 +81,71 @@ class AgentState(TypedDict, total=False):
     used_tools: list[str]
 
 
+SAFETY_HINT_KEYWORDS = {
+    "fake visa",
+    "visa shortcut",
+    "shortcut",
+    "bypass",
+    "illegal",
+    "exploit",
+    "evade policy",
+}
+
+BACKGROUND_ONLY_PREFIXES = (
+    "i will",
+    "i am",
+    "i'm",
+    "my rent is",
+    "my budget is",
+    "i study",
+    "i will study",
+)
+
+TASK_REQUEST_HINTS = {
+    "can you",
+    "could you",
+    "please",
+    "help me",
+    "what should",
+    "how do",
+    "calculate",
+    "estimate",
+    "plan",
+    "checklist",
+}
+
+
+def _is_context_only_message(message: str) -> bool:
+    message_lower = message.strip().lower()
+    if not message_lower:
+        return False
+    if "?" in message_lower:
+        return False
+    if any(hint in message_lower for hint in TASK_REQUEST_HINTS):
+        return False
+    return any(message_lower.startswith(prefix) for prefix in BACKGROUND_ONLY_PREFIXES)
+
+
+def _should_force_rag_for_safety(message: str) -> bool:
+    message_lower = message.lower()
+    return any(keyword in message_lower for keyword in SAFETY_HINT_KEYWORDS)
+
+
+def _should_prefer_rag_for_ambiguous_plan(message: str) -> bool:
+    message_lower = message.lower()
+    has_plan_intent = "plan" in message_lower or "first month" in message_lower
+    has_student_context = "student" in message_lower or "sydney" in message_lower or "usyd" in message_lower
+    return has_plan_intent and has_student_context
+
+
 def _keyword_route(message: str) -> Route:
     message_lower = message.lower()
+    if _should_force_rag_for_safety(message):
+        return "rag"
+    if _is_context_only_message(message):
+        return "chat"
+    if _should_prefer_rag_for_ambiguous_plan(message):
+        return "rag"
     if any(keyword in message_lower for keyword in TOOL_HINT_KEYWORDS):
         return "tool"
     if any(keyword in message_lower for keyword in RAG_HINT_KEYWORDS):
@@ -104,6 +179,18 @@ async def _route_node(state: AgentState) -> AgentState:
     message = state["message"]
     chat_history = state.get("chat_history", "")
     trace_id = state.get("trace_id", "n/a")
+    if _should_force_rag_for_safety(message):
+        reason = "Safety-sensitive or policy-bypass request detected; using rag for compliant guidance."
+        logger.trace(f"trace_id={trace_id} route_decision=rag reason={reason}")
+        return {"route": "rag", "router_reason": reason}
+    if _is_context_only_message(message):
+        reason = "Background-only input without explicit task request; using chat for clarification/context."
+        logger.trace(f"trace_id={trace_id} route_decision=chat reason={reason}")
+        return {"route": "chat", "router_reason": reason}
+    if _should_prefer_rag_for_ambiguous_plan(message):
+        reason = "Ambiguous onboarding planning request; applying retrieval-first (rag) strategy."
+        logger.trace(f"trace_id={trace_id} route_decision=rag reason={reason}")
+        return {"route": "rag", "router_reason": reason}
     try:
         decision = await _llm_route(message, chat_history)
         logger.trace(

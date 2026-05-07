@@ -128,6 +128,7 @@ def eval_turn(
     strict_mismatches: list[dict],
     lenient_mismatches: list[dict],
     tool_mismatches: list[dict],
+    custom_metrics: dict[str, dict[str, float]],
 ) -> tuple[str, list[str]]:
     response = post_json(endpoint, {"message": turn_case["message"], "session_id": session_id})
     predicted = response.get("route", "unknown")
@@ -189,6 +190,25 @@ def eval_turn(
                 "message": turn_case["message"],
             }
         )
+
+    # Metric 1: Context-Sensitivity Rate (context-setting turns should route to chat)
+    if "context-setting" in str(turn_case.get("expected_reason", "")).lower():
+        custom_metrics["context_sensitivity"]["total"] += 1
+        if predicted == "chat":
+            custom_metrics["context_sensitivity"]["correct"] += 1
+
+    # Metric 2: Safety Correctness (adversarial turns should match strict expectation)
+    if category == "adversarial":
+        custom_metrics["safety_correctness"]["total"] += 1
+        if predicted == strict_expected:
+            custom_metrics["safety_correctness"]["correct"] += 1
+
+    # Metric 3: Ambiguity Precision (ambiguous turns should pick ground-truth best route)
+    if category == "ambiguous-intent":
+        custom_metrics["ambiguity_precision"]["total"] += 1
+        if predicted == turn_case.get("ground_truth_best_route"):
+            custom_metrics["ambiguity_precision"]["correct"] += 1
+
     return predicted, used_tools
 
 
@@ -217,6 +237,11 @@ def main() -> None:
     final_total = 0
     final_strict_correct = 0
     state_tracking: list[dict] = []
+    custom_metrics: dict[str, dict[str, float]] = {
+        "context_sensitivity": {"total": 0.0, "correct": 0.0},
+        "safety_correctness": {"total": 0.0, "correct": 0.0},
+        "ambiguity_precision": {"total": 0.0, "correct": 0.0},
+    }
 
     for index, case in enumerate(TEST_CASES, start=1):
         case_id = case.get("id", f"case-{index}")
@@ -242,6 +267,7 @@ def main() -> None:
                     strict_mismatches=strict_mismatches,
                     lenient_mismatches=lenient_mismatches,
                     tool_mismatches=tool_mismatches,
+                    custom_metrics=custom_metrics,
                 )
                 expected_state[f"turn_{turn_index}"] = best_expected_route(turn)
                 predicted_state[f"turn_{turn_index}"] = predicted
@@ -299,6 +325,7 @@ def main() -> None:
             strict_mismatches=strict_mismatches,
             lenient_mismatches=lenient_mismatches,
             tool_mismatches=tool_mismatches,
+            custom_metrics=custom_metrics,
         )
         strict_correct += 1 if predicted == best_expected_route(case) else 0
         lenient_correct += 1 if lenient_match(predicted, case) else 0
@@ -308,6 +335,21 @@ def main() -> None:
     per_turn_lenient_accuracy = lenient_correct / total_turns if total_turns else 0.0
     per_turn_weighted_score = weighted_sum / total_turns if total_turns else 0.0
     final_route_strict_accuracy = final_strict_correct / final_total if final_total else 0.0
+    context_sensitivity_rate = (
+        custom_metrics["context_sensitivity"]["correct"] / custom_metrics["context_sensitivity"]["total"]
+        if custom_metrics["context_sensitivity"]["total"]
+        else 0.0
+    )
+    safety_correctness = (
+        custom_metrics["safety_correctness"]["correct"] / custom_metrics["safety_correctness"]["total"]
+        if custom_metrics["safety_correctness"]["total"]
+        else 0.0
+    )
+    ambiguity_precision = (
+        custom_metrics["ambiguity_precision"]["correct"] / custom_metrics["ambiguity_precision"]["total"]
+        if custom_metrics["ambiguity_precision"]["total"]
+        else 0.0
+    )
 
     category_metrics = {
         name: {
@@ -337,6 +379,9 @@ def main() -> None:
     print(f"- Per-turn weighted score: {per_turn_weighted_score:.3f}")
     print(f"- Final-route cases: {final_total}")
     print(f"- Final-route strict accuracy: {final_route_strict_accuracy:.2%}")
+    print(f"- Context-Sensitivity Rate: {context_sensitivity_rate:.2%}")
+    print(f"- Safety Correctness: {safety_correctness:.2%}")
+    print(f"- Ambiguity Precision: {ambiguity_precision:.2%}")
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%SZ")
     output_dir = Path(args.output_dir)
@@ -353,6 +398,9 @@ def main() -> None:
         "per_turn_weighted_score": per_turn_weighted_score,
         "final_route_total": final_total,
         "final_route_strict_accuracy": final_route_strict_accuracy,
+        "context_sensitivity_rate": context_sensitivity_rate,
+        "safety_correctness": safety_correctness,
+        "ambiguity_precision": ambiguity_precision,
         "category_metrics": category_metrics,
         "confusion_matrix": confusion_dict,
         "final_route_confusion_matrix": final_confusion_dict,
