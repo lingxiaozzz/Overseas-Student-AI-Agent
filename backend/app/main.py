@@ -162,6 +162,16 @@ async def agent_chat(request: ChatRequest, http_request: Request) -> AgentChatRe
         f"elapsed_ms={elapsed_ms}"
     )
     step_results = result.get("step_results", [])
+    raw_action_source = (
+        step_results[-1].get("action_source", result.get("action_decision_source", "rule_fallback"))
+        if step_results
+        else result.get("action_decision_source", "rule_fallback")
+    )
+    action_source = (
+        raw_action_source
+        if raw_action_source in {"llm", "hint_fallback", "rule_fallback"}
+        else "rule_fallback"
+    )
     return AgentChatResponse(
         answer=result["answer"],
         route=result["route"],
@@ -242,13 +252,6 @@ async def agent_chat(request: ChatRequest, http_request: Request) -> AgentChatRe
                 if step_results
                 else result.get("router_reason", "")
             ),
-            source=(
-                step_results[-1].get(
-                    "action_source",
-                    result.get("action_decision_source", "rule_fallback"),
-                )
-                if step_results
-                else result.get("action_decision_source", "rule_fallback")
-            ),
+            source=action_source,
         ),
     )

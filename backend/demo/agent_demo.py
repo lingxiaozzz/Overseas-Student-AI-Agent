@@ -69,15 +69,19 @@ def evaluate_case(case: dict[str, Any], response: dict[str, Any]) -> list[str]:
     failures: list[str] = []
     used_tools = set(response.get("used_tools") or [])
     steps = response.get("steps") or []
-    step_routes = {step.get("route") for step in steps}
+    step_routes = {step.get("route") for step in steps if step.get("route")}
+    seen_routes = step_routes or {response.get("route")}
     metrics = response.get("metrics") or {}
     steps_used = int(metrics.get("steps_used", len(steps) or 0))
 
-    if case.get("required_route") and response.get("route") != case["required_route"]:
-        failures.append(f"route={response.get('route')} expected={case['required_route']}")
+    # Dynamic Observation→Action may finish on a later synthesis step, so accept
+    # either the final route or any executed step route.
+    required_route = case.get("required_route")
+    if required_route and required_route not in seen_routes:
+        failures.append(f"routes={sorted(seen_routes)} expected to include {required_route}")
 
     required_any = set(case.get("required_routes_any") or [])
-    if required_any and not required_any.intersection(step_routes or {response.get("route")}):
+    if required_any and not required_any.intersection(seen_routes):
         failures.append(f"missing routes any of {sorted(required_any)}")
 
     required_tools = set(case.get("required_tools") or [])
@@ -87,6 +91,23 @@ def evaluate_case(case: dict[str, Any], response: dict[str, Any]) -> list[str]:
     min_steps = int(case.get("min_steps", 1))
     if steps_used < min_steps:
         failures.append(f"steps_used={steps_used} expected>={min_steps}")
+
+    # Structural checks for the interview-facing observability fields.
+    observation = response.get("last_observation") or {}
+    action_decision = response.get("last_action_decision") or {}
+    if not isinstance(observation, dict) or "completed_steps" not in observation:
+        failures.append("missing last_observation.completed_steps")
+    if not isinstance(action_decision, dict) or not action_decision.get("content"):
+        failures.append("missing last_action_decision.content")
+
+    read_layers = {
+        event.get("layer")
+        for event in (response.get("memory_reads") or [])
+        if isinstance(event, dict)
+    }
+    expected_layers = {"working", "long_term", "experience"}
+    if not expected_layers.issubset(read_layers):
+        failures.append(f"memory_reads layers={sorted(read_layers)} expected {sorted(expected_layers)}")
 
     return failures
 
@@ -111,8 +132,10 @@ def print_case_result(
     print(f"trace_id: {trace_id}")
     print(f"route: {response.get('route')} | reason: {response.get('router_reason')}")
     print(f"plan.goal: {plan.get('goal')}")
-    print(f"plan.subgoals ({len(plan.get('subgoals', []))}): {plan.get('subgoals', [])}")
-    print("steps:")
+    print(
+        f"plan.subgoals/hints ({len(plan.get('subgoals', []))}): {plan.get('subgoals', [])}"
+    )
+    print("steps (executed actions):")
     for step in steps:
         print(
             f"  - #{step.get('step_index')} [{step.get('route')}] "
