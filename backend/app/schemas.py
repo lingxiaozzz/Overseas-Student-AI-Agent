@@ -65,6 +65,7 @@ class AgentMetrics(BaseModel):
     steps_used: int
     tool_calls: int
     replanned: bool
+    memory_hits: int = 0
 
 
 class AgentChatResponse(RagChatResponse):
@@ -75,3 +76,4 @@ class AgentChatResponse(RagChatResponse):
     steps: list[PlanStepResult]
     reflection: ReflectionInfo
     metrics: AgentMetrics
+    memory_lessons: list[str] = Field(default_factory=list)

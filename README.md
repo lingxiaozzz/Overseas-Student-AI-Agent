@@ -57,6 +57,10 @@ RETRY_INITIAL_SECONDS=1.0
 RETRY_MAX_SECONDS=8.0
 LOG_LEVEL=INFO
 MAX_PLAN_STEPS=4
+EXPERIENCE_MEMORY_MAX_ITEMS=200
+EXPERIENCE_MEMORY_TOP_K=3
+EXPERIENCE_MEMORY_MIN_SCORE=0.2
+EXPERIENCE_MEMORY_ENABLED=true
 ```
 
 You can create a Gemini API key from Google AI Studio:
@@ -120,7 +124,8 @@ The agent response includes:
 - `plan`: overall `goal` and ordered `subgoals` from the planner.
 - `steps`: per-step route, reason, tools, and answer preview.
 - `reflection`: progress, next action (`continue`/`replan`/`finish`), and lesson.
-- `metrics`: `steps_used`, `tool_calls`, and whether replanning happened.
+- `metrics`: `steps_used`, `tool_calls`, whether replanning happened, and `memory_hits`.
+- `memory_lessons`: retrieved episodic lessons used by the planner (if any).
 - `sources`: retrieved files aggregated across steps (empty for direct chat).
 - `retrieved_contexts`: retrieved ranked snippets aggregated across steps.
 - `used_tools`: tool names used during tool-calling steps.
@@ -130,6 +135,14 @@ Hierarchical planning behavior:
 - `/agent-chat` runs `plan -> act -> execute -> reflect (-> replan) -> finalize`.
 - Simple requests usually stay single-step; complex goals can expand to multiple subgoals.
 - `MAX_PLAN_STEPS` caps the planning horizon (default `4`).
+
+Memory layers:
+
+- Working memory: recent turns by `session_id` (`MEMORY_MAX_TURNS`).
+- Experience memory: task lessons persisted under `data/memory/experiences.json` and retrieved for future planning.
+- World knowledge: RAG knowledge base under `data/knowledge_base`.
+- Tune experience retrieval with `EXPERIENCE_MEMORY_TOP_K`, `EXPERIENCE_MEMORY_MAX_ITEMS`, and `EXPERIENCE_MEMORY_MIN_SCORE`.
+- Eval sessions (`route-eval*`) and `x-persist-experience: false` do not write experience memory.
 
 Try the `POST /tool-chat` endpoint with:
 
@@ -148,8 +161,8 @@ Tool chat response includes:
 Memory behavior:
 
 - Use the same `session_id` to keep conversation continuity across `/chat`, `/rag-chat`, `/tool-chat`, and `/agent-chat`.
-- Recent turns are stored in memory only (server runtime), not persisted to database.
-- `MEMORY_MAX_TURNS` controls how many recent user-assistant turns are retained per session.
+- Working memory keeps recent turns in process memory (`MEMORY_MAX_TURNS`).
+- Experience memory persists task lessons to `data/memory/experiences.json` and injects relevant lessons into planning.
 
 Retry behavior:
 
@@ -204,3 +217,24 @@ The script prints:
 - JSON report files:
   - `eval/reports/route-eval-<timestamp>.json`
   - `eval/reports/latest.json`
+
+## Task Evaluation
+
+Evaluate hierarchical planning quality (success rate, steps, tools, reflection):
+
+```powershell
+cd backend
+python eval/task_eval.py --base-url http://127.0.0.1:8000
+```
+
+The script prints:
+
+- task success rate
+- average steps / tool calls
+- replan rate
+- reflection finish rate
+- memory hit rate
+- per-category success
+- JSON report files:
+  - `eval/reports/task-eval-<timestamp>.json`
+  - `eval/reports/task-latest.json`

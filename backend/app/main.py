@@ -34,6 +34,13 @@ def _trace_id_from_request(request: Request) -> str:
     return f"trace-{uuid4().hex[:12]}"
 
 
+def _persist_experience_from_request(request: Request) -> bool:
+    raw = request.headers.get("x-persist-experience")
+    if raw is None:
+        return True
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
 @app.get("/health")
 async def health_check() -> dict[str, str]:
     return {"status": "ok"}
@@ -118,7 +125,13 @@ async def agent_chat(request: ChatRequest, http_request: Request) -> AgentChatRe
     start = perf_counter()
     try:
         chat_history = get_chat_history_text(request.session_id)
-        result = await run_agent_workflow(request.message, chat_history=chat_history, trace_id=trace_id)
+        result = await run_agent_workflow(
+            request.message,
+            chat_history=chat_history,
+            trace_id=trace_id,
+            session_id=request.session_id,
+            persist_experience=_persist_experience_from_request(http_request),
+        )
     except MissingApiKeyError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -172,5 +185,7 @@ async def agent_chat(request: ChatRequest, http_request: Request) -> AgentChatRe
             steps_used=int(result.get("steps_used", len(step_results))),
             tool_calls=int(result.get("tool_calls", 0)),
             replanned=bool(result.get("replanned", False)),
+            memory_hits=int(result.get("memory_hits", 0)),
         ),
+        memory_lessons=list(result.get("memory_lessons", [])),
     )

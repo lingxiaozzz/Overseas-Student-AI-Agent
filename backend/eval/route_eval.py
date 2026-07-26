@@ -77,11 +77,14 @@ TEST_CASES = [
 ]
 
 
-def post_json(url: str, payload: dict) -> dict:
+def post_json(url: str, payload: dict, headers: dict[str, str] | None = None) -> dict:
+    request_headers = {"Content-Type": "application/json"}
+    if headers:
+        request_headers.update(headers)
     request = urllib.request.Request(
         url=url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers=request_headers,
         method="POST",
     )
     try:
@@ -130,7 +133,11 @@ def eval_turn(
     tool_mismatches: list[dict],
     custom_metrics: dict[str, dict[str, float]],
 ) -> tuple[str, list[str]]:
-    response = post_json(endpoint, {"message": turn_case["message"], "session_id": session_id})
+    response = post_json(
+        endpoint,
+        {"message": turn_case["message"], "session_id": session_id},
+        headers={"x-persist-experience": "false"},
+    )
     predicted = response.get("route", "unknown")
     used_tools = response.get("used_tools", [])
     strict_expected = best_expected_route(turn_case)

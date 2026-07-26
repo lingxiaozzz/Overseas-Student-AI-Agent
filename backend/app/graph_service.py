@@ -9,6 +9,12 @@ from pydantic import BaseModel, Field
 from app.chat_service import MissingApiKeyError, generate_chat_response
 from app.config import settings
 from app.logging_service import get_logger
+from app.memory_service import (
+    append_experience,
+    build_experience_lesson,
+    format_experience_context,
+    retrieve_experiences,
+)
 from app.rag_service import generate_rag_response
 from app.schemas import RetrievedContext
 from app.retry_service import with_retry
@@ -71,6 +77,7 @@ Rules:
 3) Keep each subgoal concrete and independently actionable.
 4) Do not invent unrelated tasks.
 5) Prefer retrieval before generation when policy/onboarding facts are needed.
+6) If prior experience lessons are provided, reuse useful strategy patterns and avoid previously failed approaches.
 
 Return strict JSON with:
 - goal: short restatement of the overall goal
@@ -104,6 +111,7 @@ class StepRecord(TypedDict, total=False):
 class AgentState(TypedDict, total=False):
     message: str
     chat_history: str
+    session_id: str
     trace_id: str
     goal: str
     subgoals: list[str]
@@ -123,6 +131,10 @@ class AgentState(TypedDict, total=False):
     replanned: bool
     steps_used: int
     tool_calls: int
+    experience_context: str
+    memory_lessons: list[str]
+    memory_hits: int
+    persist_experience: bool
 
 
 SAFETY_HINT_KEYWORDS = {
@@ -256,7 +268,7 @@ async def _decide_route(message: str, chat_history: str, trace_id: str) -> Route
         )
 
 
-async def _llm_plan(message: str, chat_history: str) -> PlanDecision:
+async def _llm_plan(message: str, chat_history: str, experience_context: str) -> PlanDecision:
     if not settings.google_api_key:
         raise MissingApiKeyError("GOOGLE_API_KEY is not set.")
 
@@ -265,7 +277,9 @@ async def _llm_plan(message: str, chat_history: str) -> PlanDecision:
             ("system", PLANNER_PROMPT),
             (
                 "human",
-                "Conversation history:\n{chat_history}\n\nUser goal:\n{message}",
+                "Conversation history:\n{chat_history}\n\n"
+                "Prior experience lessons:\n{experience_context}\n\n"
+                "User goal:\n{message}",
             ),
         ]
     )
@@ -275,7 +289,15 @@ async def _llm_plan(message: str, chat_history: str) -> PlanDecision:
         temperature=0,
     ).with_structured_output(PlanDecision)
     chain = prompt | model
-    return await with_retry(lambda: chain.ainvoke({"message": message, "chat_history": chat_history}))
+    return await with_retry(
+        lambda: chain.ainvoke(
+            {
+                "message": message,
+                "chat_history": chat_history,
+                "experience_context": experience_context,
+            }
+        )
+    )
 
 
 def _normalize_subgoals(message: str, plan: PlanDecision) -> list[str]:
@@ -289,8 +311,21 @@ def _normalize_subgoals(message: str, plan: PlanDecision) -> list[str]:
 async def _plan_node(state: AgentState) -> AgentState:
     message = state["message"]
     chat_history = state.get("chat_history", "")
+    session_id = state.get("session_id", "default")
     trace_id = state.get("trace_id", "n/a")
     max_steps = state.get("max_steps", settings.max_plan_steps)
+
+    experience_records = retrieve_experiences(message, session_id=session_id)
+    experience_context = format_experience_context(experience_records)
+    memory_lessons = [
+        str(item.get("lesson", "")).strip()
+        for item in experience_records
+        if str(item.get("lesson", "")).strip()
+    ]
+    memory_hits = len(experience_records)
+    logger.trace(
+        f"trace_id={trace_id} memory_hits={memory_hits} session_id={session_id}"
+    )
 
     # Keep trivial context-only turns as single-step plans.
     if _is_context_only_message(message):
@@ -310,10 +345,13 @@ async def _plan_node(state: AgentState) -> AgentState:
             "reflect_next_action": "continue",
             "reflect_progress": 0.0,
             "reflect_lesson": "Single-step context acknowledgment plan.",
+            "experience_context": experience_context,
+            "memory_lessons": memory_lessons,
+            "memory_hits": memory_hits,
         }
 
     try:
-        plan = await _llm_plan(message, chat_history)
+        plan = await _llm_plan(message, chat_history, experience_context)
         goal = plan.goal.strip() or message
         subgoals = _normalize_subgoals(message, plan)
     except Exception:
@@ -337,6 +375,9 @@ async def _plan_node(state: AgentState) -> AgentState:
         "reflect_next_action": "continue",
         "reflect_progress": 0.0,
         "reflect_lesson": "Initial hierarchical plan created.",
+        "experience_context": experience_context,
+        "memory_lessons": memory_lessons,
+        "memory_hits": memory_hits,
     }
 
 
@@ -472,6 +513,7 @@ async def _replan_node(state: AgentState) -> AgentState:
         plan = await _llm_plan(
             f"Previous plan stalled. Create a simpler remaining plan for: {message}",
             chat_history,
+            state.get("experience_context", "No prior experience lessons."),
         )
         new_subgoals = _normalize_subgoals(message, plan)[:remaining_budget]
         goal = plan.goal.strip() or state.get("goal", message)
@@ -501,7 +543,30 @@ async def _replan_node(state: AgentState) -> AgentState:
 
 async def _finalize_node(state: AgentState) -> AgentState:
     step_results = state.get("step_results", [])
+    session_id = state.get("session_id", "default")
+    goal = state.get("goal", state.get("message", ""))
+    persist_experience = bool(state.get("persist_experience", True))
+    replanned = bool(state.get("replanned", False))
+
     if not step_results:
+        lesson = build_experience_lesson(
+            goal,
+            routes=[],
+            tools=[],
+            success=False,
+            replanned=replanned,
+            steps_used=0,
+        )
+        append_experience(
+            session_id=session_id,
+            goal=goal,
+            lesson=lesson,
+            routes=[],
+            tools=[],
+            success=False,
+            steps_used=0,
+            persist_experience=persist_experience,
+        )
         return {
             "answer": "I could not complete the planned steps for this request.",
             "route": state.get("route", "chat"),
@@ -514,7 +579,9 @@ async def _finalize_node(state: AgentState) -> AgentState:
             "reflect_done": True,
             "reflect_next_action": "finish",
             "reflect_progress": 0.0,
-            "reflect_lesson": state.get("reflect_lesson", "No steps executed."),
+            "reflect_lesson": lesson,
+            "memory_lessons": state.get("memory_lessons", []),
+            "memory_hits": state.get("memory_hits", 0),
         }
 
     if len(step_results) == 1:
@@ -529,7 +596,9 @@ async def _finalize_node(state: AgentState) -> AgentState:
     sources: list[str] = []
     retrieved_contexts: list[RetrievedContext] = []
     used_tools: list[str] = []
+    routes: list[str] = []
     for item in step_results:
+        routes.append(item["route"])
         for source in item.get("sources", []):
             if source not in sources:
                 sources.append(source)
@@ -539,6 +608,25 @@ async def _finalize_node(state: AgentState) -> AgentState:
                 used_tools.append(tool_name)
 
     last = step_results[-1]
+    steps_used = state.get("steps_used", len(step_results))
+    lesson = build_experience_lesson(
+        goal,
+        routes=routes,
+        tools=used_tools,
+        success=True,
+        replanned=replanned,
+        steps_used=steps_used,
+    )
+    append_experience(
+        session_id=session_id,
+        goal=goal,
+        lesson=lesson,
+        routes=routes,
+        tools=used_tools,
+        success=True,
+        steps_used=steps_used,
+        persist_experience=persist_experience,
+    )
     return {
         "answer": answer,
         "route": last["route"],
@@ -546,12 +634,14 @@ async def _finalize_node(state: AgentState) -> AgentState:
         "sources": sources,
         "retrieved_contexts": retrieved_contexts,
         "used_tools": used_tools,
-        "steps_used": state.get("steps_used", len(step_results)),
+        "steps_used": steps_used,
         "tool_calls": state.get("tool_calls", len(used_tools)),
         "reflect_done": True,
         "reflect_next_action": "finish",
         "reflect_progress": 1.0,
-        "reflect_lesson": state.get("reflect_lesson", "Plan finalized."),
+        "reflect_lesson": lesson,
+        "memory_lessons": state.get("memory_lessons", []),
+        "memory_hits": state.get("memory_hits", 0),
     }
 
 
@@ -592,12 +682,19 @@ def _build_agent_graph():
     return graph.compile()
 
 
-async def run_agent_workflow(message: str, chat_history: str = "", trace_id: str = "n/a") -> AgentState:
+async def run_agent_workflow(
+    message: str,
+    chat_history: str = "",
+    trace_id: str = "n/a",
+    session_id: str = "default",
+    persist_experience: bool = True,
+) -> AgentState:
     graph = _build_agent_graph()
     result = await graph.ainvoke(
         {
             "message": message,
             "chat_history": chat_history,
+            "session_id": session_id,
             "trace_id": trace_id,
             "max_steps": settings.max_plan_steps,
             "step_results": [],
@@ -605,6 +702,10 @@ async def run_agent_workflow(message: str, chat_history: str = "", trace_id: str
             "replanned": False,
             "steps_used": 0,
             "tool_calls": 0,
+            "memory_lessons": [],
+            "memory_hits": 0,
+            "experience_context": "No prior experience lessons.",
+            "persist_experience": persist_experience,
         }
     )
     return result
