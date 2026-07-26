@@ -15,6 +15,7 @@ from app.schemas import (
     AgentPlan,
     ChatRequest,
     ChatResponse,
+    EnvironmentInfo,
     PlanStepResult,
     RagChatResponse,
     ReflectionInfo,
@@ -172,6 +173,8 @@ async def agent_chat(request: ChatRequest, http_request: Request) -> AgentChatRe
                 router_reason=item["router_reason"],
                 answer_preview=item.get("answer_preview", ""),
                 used_tools=item.get("used_tools", []),
+                reward=float(item.get("reward", 0.0)),
+                action_type=str(item.get("action_type", item["route"])),
             )
             for item in step_results
         ],
@@ -186,6 +189,12 @@ async def agent_chat(request: ChatRequest, http_request: Request) -> AgentChatRe
             tool_calls=int(result.get("tool_calls", 0)),
             replanned=bool(result.get("replanned", False)),
             memory_hits=int(result.get("memory_hits", 0)),
+            last_reward=float(result.get("last_reward", 0.0)),
+            total_reward=float(result.get("total_reward", 0.0)),
         ),
         memory_lessons=list(result.get("memory_lessons", [])),
+        environment=EnvironmentInfo(
+            name=result.get("environment_name", "student_support"),
+            action_space=list(result.get("action_space", ["chat", "rag", "tool"])),
+        ),
     )

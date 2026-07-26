@@ -52,6 +52,8 @@ class PlanStepResult(BaseModel):
     router_reason: str
     answer_preview: str
     used_tools: list[str]
+    reward: float = 0.0
+    action_type: str = "chat"
 
 
 class ReflectionInfo(BaseModel):
@@ -66,6 +68,13 @@ class AgentMetrics(BaseModel):
     tool_calls: int
     replanned: bool
     memory_hits: int = 0
+    last_reward: float = 0.0
+    total_reward: float = 0.0
+
+
+class EnvironmentInfo(BaseModel):
+    name: str
+    action_space: list[str]
 
 
 class AgentChatResponse(RagChatResponse):
@@ -77,3 +86,4 @@ class AgentChatResponse(RagChatResponse):
     reflection: ReflectionInfo
     metrics: AgentMetrics
     memory_lessons: list[str] = Field(default_factory=list)
+    environment: EnvironmentInfo

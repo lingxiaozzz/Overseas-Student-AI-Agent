@@ -6,8 +6,9 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import END, StateGraph
 from pydantic import BaseModel, Field
 
-from app.chat_service import MissingApiKeyError, generate_chat_response
+from app.chat_service import MissingApiKeyError
 from app.config import settings
+from app.environment import Action, clear_env, get_or_create_env, reset_env
 from app.logging_service import get_logger
 from app.memory_service import (
     append_experience,
@@ -15,10 +16,8 @@ from app.memory_service import (
     format_experience_context,
     retrieve_experiences,
 )
-from app.rag_service import generate_rag_response
 from app.schemas import RetrievedContext
 from app.retry_service import with_retry
-from app.tool_service import generate_tool_response
 
 Route = Literal["chat", "rag", "tool"]
 ReflectAction = Literal["continue", "replan", "finish"]
@@ -106,6 +105,8 @@ class StepRecord(TypedDict, total=False):
     sources: list[str]
     retrieved_contexts: list[RetrievedContext]
     used_tools: list[str]
+    reward: float
+    action_type: str
 
 
 class AgentState(TypedDict, total=False):
@@ -135,6 +136,10 @@ class AgentState(TypedDict, total=False):
     memory_lessons: list[str]
     memory_hits: int
     persist_experience: bool
+    environment_name: str
+    action_space: list[str]
+    last_reward: float
+    total_reward: float
 
 
 SAFETY_HINT_KEYWORDS = {
@@ -314,6 +319,14 @@ async def _plan_node(state: AgentState) -> AgentState:
     session_id = state.get("session_id", "default")
     trace_id = state.get("trace_id", "n/a")
     max_steps = state.get("max_steps", settings.max_plan_steps)
+    environment_name = state.get("environment_name", "student_support")
+    observation = reset_env(
+        trace_id=trace_id,
+        goal=message,
+        chat_history=chat_history,
+        environment_name=environment_name,
+    )
+    action_space = observation.available_actions
 
     experience_records = retrieve_experiences(message, session_id=session_id)
     experience_context = format_experience_context(experience_records)
@@ -348,6 +361,10 @@ async def _plan_node(state: AgentState) -> AgentState:
             "experience_context": experience_context,
             "memory_lessons": memory_lessons,
             "memory_hits": memory_hits,
+            "environment_name": environment_name,
+            "action_space": action_space,
+            "last_reward": 0.0,
+            "total_reward": 0.0,
         }
 
     try:
@@ -359,8 +376,16 @@ async def _plan_node(state: AgentState) -> AgentState:
         subgoals = [message]
         logger.warning(f"trace_id={trace_id} plan_fallback=single_step reason=llm_planner_unavailable")
 
+    # Keep environment goal aligned with planner restatement.
+    reset_env(
+        trace_id=trace_id,
+        goal=goal,
+        chat_history=chat_history,
+        environment_name=environment_name,
+    )
     logger.trace(
-        f"trace_id={trace_id} plan_goal={_preview(goal, 80)} subgoals={len(subgoals)}"
+        f"trace_id={trace_id} plan_goal={_preview(goal, 80)} subgoals={len(subgoals)} "
+        f"env={environment_name} actions={action_space}"
     )
     return {
         "goal": goal,
@@ -378,6 +403,10 @@ async def _plan_node(state: AgentState) -> AgentState:
         "experience_context": experience_context,
         "memory_lessons": memory_lessons,
         "memory_hits": memory_hits,
+        "environment_name": environment_name,
+        "action_space": action_space,
+        "last_reward": 0.0,
+        "total_reward": 0.0,
     }
 
 
@@ -408,31 +437,25 @@ async def _act_node(state: AgentState) -> AgentState:
 async def _execute_node(state: AgentState) -> AgentState:
     subgoals = state.get("subgoals", [])
     current_step = state.get("current_step", 0)
-    chat_history = state.get("chat_history", "")
     route = state.get("route", "chat")
     router_reason = state.get("router_reason", "")
     trace_id = state.get("trace_id", "n/a")
+    environment_name = state.get("environment_name", "student_support")
 
     if current_step >= len(subgoals):
         return {}
 
     subgoal = subgoals[current_step]
-    sources: list[str] = []
-    retrieved_contexts: list[RetrievedContext] = []
-    used_tools: list[str] = []
-
-    if route == "rag":
-        answer, sources, retrieved_contexts = await generate_rag_response(
-            subgoal,
-            chat_history=chat_history,
-        )
-    elif route == "tool":
-        answer, used_tools = await generate_tool_response(
-            subgoal,
-            chat_history=chat_history,
-        )
-    else:
-        answer = await generate_chat_response(subgoal, chat_history=chat_history)
+    env = get_or_create_env(trace_id, environment_name)
+    step_result = await env.step(
+        Action(type=route, content=subgoal, reason=router_reason)
+    )
+    info = step_result.info
+    answer = str(info.get("answer", ""))
+    sources = list(info.get("sources", []))
+    retrieved_contexts = list(info.get("retrieved_contexts", []))
+    used_tools = list(info.get("used_tools", []))
+    reward = float(step_result.reward)
 
     step_results = list(state.get("step_results", []))
     step_results.append(
@@ -446,12 +469,16 @@ async def _execute_node(state: AgentState) -> AgentState:
             "sources": sources,
             "retrieved_contexts": retrieved_contexts,
             "used_tools": used_tools,
+            "reward": reward,
+            "action_type": step_result.action.type,
         }
     )
     steps_used = current_step + 1
     tool_calls = state.get("tool_calls", 0) + len(used_tools)
+    total_reward = float(state.get("total_reward", 0.0)) + reward
     logger.trace(
-        f"trace_id={trace_id} execute_step={steps_used} route={route} tools={used_tools}"
+        f"trace_id={trace_id} execute_step={steps_used} env={environment_name} "
+        f"action={route} reward={reward:.2f} tools={used_tools}"
     )
     return {
         "step_results": step_results,
@@ -462,6 +489,10 @@ async def _execute_node(state: AgentState) -> AgentState:
         "sources": sources,
         "retrieved_contexts": retrieved_contexts,
         "used_tools": used_tools,
+        "last_reward": reward,
+        "total_reward": total_reward,
+        "action_space": env.action_space(),
+        "environment_name": environment_name,
     }
 
 
@@ -547,6 +578,9 @@ async def _finalize_node(state: AgentState) -> AgentState:
     goal = state.get("goal", state.get("message", ""))
     persist_experience = bool(state.get("persist_experience", True))
     replanned = bool(state.get("replanned", False))
+    environment_name = state.get("environment_name", "student_support")
+    trace_id = state.get("trace_id", "n/a")
+    clear_env(trace_id, environment_name)
 
     if not step_results:
         lesson = build_experience_lesson(
@@ -582,6 +616,10 @@ async def _finalize_node(state: AgentState) -> AgentState:
             "reflect_lesson": lesson,
             "memory_lessons": state.get("memory_lessons", []),
             "memory_hits": state.get("memory_hits", 0),
+            "environment_name": environment_name,
+            "action_space": state.get("action_space", ["chat", "rag", "tool"]),
+            "last_reward": float(state.get("last_reward", 0.0)),
+            "total_reward": float(state.get("total_reward", 0.0)),
         }
 
     if len(step_results) == 1:
@@ -642,6 +680,10 @@ async def _finalize_node(state: AgentState) -> AgentState:
         "reflect_lesson": lesson,
         "memory_lessons": state.get("memory_lessons", []),
         "memory_hits": state.get("memory_hits", 0),
+        "environment_name": environment_name,
+        "action_space": state.get("action_space", ["chat", "rag", "tool"]),
+        "last_reward": float(state.get("last_reward", 0.0)),
+        "total_reward": float(state.get("total_reward", 0.0)),
     }
 
 
@@ -688,6 +730,7 @@ async def run_agent_workflow(
     trace_id: str = "n/a",
     session_id: str = "default",
     persist_experience: bool = True,
+    environment_name: str = "student_support",
 ) -> AgentState:
     graph = _build_agent_graph()
     result = await graph.ainvoke(
@@ -706,6 +749,10 @@ async def run_agent_workflow(
             "memory_hits": 0,
             "experience_context": "No prior experience lessons.",
             "persist_experience": persist_experience,
+            "environment_name": environment_name,
+            "action_space": ["chat", "rag", "tool"],
+            "last_reward": 0.0,
+            "total_reward": 0.0,
         }
     )
     return result

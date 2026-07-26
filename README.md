@@ -21,17 +21,19 @@ Later steps will add tools, memory, and LangGraph.
 ```text
 backend/
   app/
-    main.py          # FastAPI app and API routes
-    chat_service.py  # LangChain chat chain
-    rag_service.py   # LangChain RAG chain with FAISS
-    tool_service.py  # LangChain tool calling service
-    graph_service.py # LangGraph route -> (chat|rag|tool) workflow
-    memory_service.py # In-memory conversation history by session_id
-    config.py        # Environment variable loading
-    schemas.py       # Request and response models
+    main.py           # FastAPI app and API routes
+    chat_service.py   # LangChain chat chain
+    rag_service.py    # LangChain RAG chain with FAISS
+    tool_service.py   # LangChain tool calling service
+    graph_service.py  # LangGraph plan-act-reflect workflow
+    environment.py    # Observation-Action environment abstraction
+    memory_service.py # Working + experience memory
+    config.py         # Environment variable loading
+    schemas.py        # Request and response models
   requirements.txt
 data/
-  knowledge_base/    # Local markdown files used by RAG
+  knowledge_base/     # Local markdown files used by RAG (world knowledge)
+  memory/             # Persisted experience memory artifacts
 ```
 
 ## Setup
@@ -126,6 +128,7 @@ The agent response includes:
 - `reflection`: progress, next action (`continue`/`replan`/`finish`), and lesson.
 - `metrics`: `steps_used`, `tool_calls`, whether replanning happened, and `memory_hits`.
 - `memory_lessons`: retrieved episodic lessons used by the planner (if any).
+- `environment`: environment name and action space (`chat`/`rag`/`tool`).
 - `sources`: retrieved files aggregated across steps (empty for direct chat).
 - `retrieved_contexts`: retrieved ranked snippets aggregated across steps.
 - `used_tools`: tool names used during tool-calling steps.
@@ -135,6 +138,13 @@ Hierarchical planning behavior:
 - `/agent-chat` runs `plan -> act -> execute -> reflect (-> replan) -> finalize`.
 - Simple requests usually stay single-step; complex goals can expand to multiple subgoals.
 - `MAX_PLAN_STEPS` caps the planning horizon (default `4`).
+
+Environment abstraction:
+
+- Execution goes through an Observation-Action interface (`environment.py`).
+- Current adapter: `student_support` maps actions to chat/rag/tool backends.
+- Each step returns reward signal (`last_reward` / `total_reward`) for future RL-style optimization.
+- New environments can be plugged in via `create_environment(name)` without rewriting the planner loop.
 
 Memory layers:
 
