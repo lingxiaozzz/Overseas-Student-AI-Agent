@@ -125,7 +125,7 @@ The agent response includes:
 - `answer`: final synthesized answer across completed plan steps.
 - `plan`: overall `goal` and ordered `subgoals` from the planner.
 - `steps`: per-step route, reason, tools, and answer preview.
-- `reflection`: progress, next action (`continue`/`replan`/`finish`), and lesson.
+- `reflection`: progress, next action (`continue`/`replan`/`finish`), lesson, `goal_achieved`, `missing_info`, and `judge_source` (`llm` or `rule_fallback`).
 - `metrics`: `steps_used`, `tool_calls`, whether replanning happened, and `memory_hits`.
 - `memory_lessons`: retrieved episodic lessons used by the planner (if any).
 - `environment`: environment name and action space (`chat`/`rag`/`tool`).
@@ -138,6 +138,7 @@ Hierarchical planning behavior:
 - `/agent-chat` runs `plan -> act -> execute -> reflect (-> replan) -> finalize`.
 - Simple requests usually stay single-step; complex goals can expand to multiple subgoals.
 - `MAX_PLAN_STEPS` caps the planning horizon (default `4`).
+- Reflection uses an LLM-as-judge with hard safety guards and rule fallback.
 
 Environment abstraction:
 

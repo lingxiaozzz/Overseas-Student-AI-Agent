@@ -183,6 +183,9 @@ async def agent_chat(request: ChatRequest, http_request: Request) -> AgentChatRe
             next_action=result.get("reflect_next_action", "finish"),
             progress=float(result.get("reflect_progress", 1.0)),
             lesson=result.get("reflect_lesson", ""),
+            goal_achieved=bool(result.get("reflect_goal_achieved", False)),
+            missing_info=str(result.get("reflect_missing_info", "")),
+            judge_source=result.get("reflect_judge_source", "rule_fallback"),
         ),
         metrics=AgentMetrics(
             steps_used=int(result.get("steps_used", len(step_results))),

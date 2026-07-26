@@ -61,6 +61,9 @@ class ReflectionInfo(BaseModel):
     next_action: ReflectAction
     progress: float
     lesson: str
+    goal_achieved: bool = False
+    missing_info: str = ""
+    judge_source: Literal["llm", "rule_fallback"] = "rule_fallback"
 
 
 class AgentMetrics(BaseModel):

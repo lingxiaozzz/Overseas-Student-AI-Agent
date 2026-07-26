@@ -14,6 +14,7 @@ from app.memory_service import (
     append_experience,
     build_experience_lesson,
     format_experience_context,
+    is_low_value_lesson,
     retrieve_experiences,
 )
 from app.schemas import RetrievedContext
@@ -82,6 +83,29 @@ Return strict JSON with:
 - goal: short restatement of the overall goal
 - subgoals: ordered list of 1-4 subgoal strings"""
 
+REFLECTOR_PROMPT = """You are a reflection judge for a hierarchical international-student agent.
+Evaluate whether the latest execution step advances the overall goal.
+
+Choose next_action:
+- continue: more planned subgoals remain and current progress is healthy
+- replan: current approach is stalled/wrong and a new remaining plan is needed
+- finish: overall goal is sufficiently satisfied or no useful work remains
+
+Rules:
+1) Prefer finish when the user goal is adequately answered.
+2) Prefer continue only if unfinished subgoals are still necessary.
+3) Prefer replan only for clear failures (empty/irrelevant/blocked results).
+4) lesson must be an actionable strategy (route/tool preference), not a status sentence.
+5) missing_info should be brief; use empty string if none.
+
+Return strict JSON with:
+- done: boolean
+- next_action: one of continue, replan, finish
+- progress: number between 0 and 1
+- goal_achieved: boolean
+- missing_info: short string
+- lesson: one short actionable sentence"""
+
 logger = get_logger(__name__)
 
 
@@ -93,6 +117,15 @@ class RouterDecision(BaseModel):
 class PlanDecision(BaseModel):
     goal: str
     subgoals: list[str] = Field(default_factory=list)
+
+
+class ReflectionDecision(BaseModel):
+    done: bool
+    next_action: ReflectAction
+    progress: float = 0.0
+    goal_achieved: bool = False
+    missing_info: str = ""
+    lesson: str = ""
 
 
 class StepRecord(TypedDict, total=False):
@@ -140,6 +173,9 @@ class AgentState(TypedDict, total=False):
     action_space: list[str]
     last_reward: float
     total_reward: float
+    reflect_goal_achieved: bool
+    reflect_missing_info: str
+    reflect_judge_source: str
 
 
 SAFETY_HINT_KEYWORDS = {
@@ -496,41 +532,170 @@ async def _execute_node(state: AgentState) -> AgentState:
     }
 
 
-async def _reflect_node(state: AgentState) -> AgentState:
+def _rule_reflect(state: AgentState) -> ReflectionDecision:
     subgoals = state.get("subgoals", [])
     current_step = state.get("current_step", 0)
     max_steps = state.get("max_steps", settings.max_plan_steps)
     step_results = state.get("step_results", [])
     replanned = state.get("replanned", False)
-    trace_id = state.get("trace_id", "n/a")
-
     total = max(len(subgoals), 1)
     progress = min(current_step / total, 1.0)
     last_answer = step_results[-1]["answer"] if step_results else ""
 
     if current_step >= len(subgoals) or current_step >= max_steps:
-        next_action: ReflectAction = "finish"
+        return ReflectionDecision(
+            done=True,
+            next_action="finish",
+            progress=1.0,
+            goal_achieved=bool(last_answer.strip()),
+            missing_info="",
+            lesson=build_experience_lesson(
+                state.get("goal", state.get("message", "")),
+                routes=[item.get("route", "chat") for item in step_results],
+                tools=[
+                    tool_name
+                    for item in step_results
+                    for tool_name in item.get("used_tools", [])
+                ],
+                success=bool(last_answer.strip()),
+                replanned=bool(replanned),
+                steps_used=current_step,
+            ),
+        )
+    if not last_answer.strip() and not replanned:
+        return ReflectionDecision(
+            done=False,
+            next_action="replan",
+            progress=progress,
+            goal_achieved=False,
+            missing_info="Latest step returned an empty answer.",
+            lesson="Replan once after empty step outputs; avoid repeating the failed action path.",
+        )
+    return ReflectionDecision(
+        done=False,
+        next_action="continue",
+        progress=progress,
+        goal_achieved=False,
+        missing_info="",
+        lesson=f"Continue remaining subgoals ({current_step}/{len(subgoals)} completed).",
+    )
+
+
+def _clamp_progress(value: float) -> float:
+    return max(0.0, min(float(value), 1.0))
+
+
+def _apply_reflect_guards(state: AgentState, decision: ReflectionDecision) -> ReflectionDecision:
+    subgoals = state.get("subgoals", [])
+    current_step = state.get("current_step", 0)
+    max_steps = state.get("max_steps", settings.max_plan_steps)
+    replanned = bool(state.get("replanned", False))
+    step_results = state.get("step_results", [])
+    last_answer = step_results[-1]["answer"] if step_results else ""
+    remaining = max(len(subgoals) - current_step, 0)
+
+    next_action = decision.next_action
+    done = decision.done
+    progress = _clamp_progress(decision.progress)
+
+    if current_step >= len(subgoals) or current_step >= max_steps:
+        next_action = "finish"
         done = True
-        lesson = "All planned subgoals completed or step budget reached."
+        progress = 1.0
     elif not last_answer.strip() and not replanned:
-        # One-shot replan when execution produced an empty answer.
         next_action = "replan"
         done = False
-        lesson = "Empty step result detected; triggering one-shot replan."
-    else:
-        next_action = "continue"
-        done = False
-        lesson = f"Completed {current_step}/{len(subgoals)} subgoals; continuing hierarchical execution."
+    elif next_action == "replan" and replanned:
+        next_action = "continue" if remaining > 0 else "finish"
+        done = next_action == "finish"
+    elif next_action == "continue" and remaining <= 0:
+        next_action = "finish"
+        done = True
+        progress = 1.0
+
+    lesson = decision.lesson.strip()
+    if not lesson or is_low_value_lesson(lesson):
+        lesson = _rule_reflect(state).lesson
+
+    return ReflectionDecision(
+        done=done,
+        next_action=next_action,
+        progress=progress,
+        goal_achieved=bool(decision.goal_achieved) if next_action == "finish" else False,
+        missing_info=decision.missing_info.strip(),
+        lesson=lesson,
+    )
+
+
+async def _llm_reflect(state: AgentState) -> ReflectionDecision:
+    if not settings.google_api_key:
+        raise MissingApiKeyError("GOOGLE_API_KEY is not set.")
+
+    step_results = state.get("step_results", [])
+    latest = step_results[-1] if step_results else {}
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", REFLECTOR_PROMPT),
+            (
+                "human",
+                "Overall goal:\n{goal}\n\n"
+                "Planned subgoals:\n{subgoals}\n\n"
+                "Completed steps: {current_step}/{total_steps}\n"
+                "Already replanned: {replanned}\n"
+                "Latest subgoal:\n{latest_subgoal}\n"
+                "Latest route: {latest_route}\n"
+                "Latest tools: {latest_tools}\n"
+                "Latest answer preview:\n{latest_answer}\n",
+            ),
+        ]
+    )
+    model = ChatGoogleGenerativeAI(
+        model=settings.gemini_model,
+        google_api_key=settings.google_api_key,
+        temperature=0,
+    ).with_structured_output(ReflectionDecision)
+    chain = prompt | model
+    subgoals = state.get("subgoals", [])
+    return await with_retry(
+        lambda: chain.ainvoke(
+            {
+                "goal": state.get("goal", state.get("message", "")),
+                "subgoals": "\n".join(f"- {item}" for item in subgoals) or "- none",
+                "current_step": state.get("current_step", 0),
+                "total_steps": len(subgoals),
+                "replanned": bool(state.get("replanned", False)),
+                "latest_subgoal": latest.get("subgoal", ""),
+                "latest_route": latest.get("route", "unknown"),
+                "latest_tools": ", ".join(latest.get("used_tools", [])) or "none",
+                "latest_answer": _preview(str(latest.get("answer", "")), 500),
+            }
+        )
+    )
+
+
+async def _reflect_node(state: AgentState) -> AgentState:
+    trace_id = state.get("trace_id", "n/a")
+    judge_source = "llm"
+    try:
+        decision = await _llm_reflect(state)
+        decision = _apply_reflect_guards(state, decision)
+    except Exception:
+        judge_source = "rule_fallback"
+        decision = _rule_reflect(state)
+        logger.warning(f"trace_id={trace_id} reflect_fallback=rule reason=llm_reflect_unavailable")
 
     logger.trace(
-        f"trace_id={trace_id} reflect_action={next_action} progress={progress:.2f} "
-        f"step={current_step}/{len(subgoals)}"
+        f"trace_id={trace_id} reflect_action={decision.next_action} progress={decision.progress:.2f} "
+        f"goal_achieved={decision.goal_achieved} source={judge_source}"
     )
     return {
-        "reflect_done": done,
-        "reflect_next_action": next_action,
-        "reflect_progress": progress,
-        "reflect_lesson": lesson,
+        "reflect_done": decision.done,
+        "reflect_next_action": decision.next_action,
+        "reflect_progress": decision.progress,
+        "reflect_lesson": decision.lesson,
+        "reflect_goal_achieved": decision.goal_achieved,
+        "reflect_missing_info": decision.missing_info,
+        "reflect_judge_source": judge_source,
     }
 
 
@@ -647,14 +812,18 @@ async def _finalize_node(state: AgentState) -> AgentState:
 
     last = step_results[-1]
     steps_used = state.get("steps_used", len(step_results))
-    lesson = build_experience_lesson(
-        goal,
-        routes=routes,
-        tools=used_tools,
-        success=True,
-        replanned=replanned,
-        steps_used=steps_used,
-    )
+    reflect_lesson = str(state.get("reflect_lesson", "")).strip()
+    if reflect_lesson and not is_low_value_lesson(reflect_lesson):
+        lesson = reflect_lesson
+    else:
+        lesson = build_experience_lesson(
+            goal,
+            routes=routes,
+            tools=used_tools,
+            success=True,
+            replanned=replanned,
+            steps_used=steps_used,
+        )
     append_experience(
         session_id=session_id,
         goal=goal,
@@ -678,6 +847,9 @@ async def _finalize_node(state: AgentState) -> AgentState:
         "reflect_next_action": "finish",
         "reflect_progress": 1.0,
         "reflect_lesson": lesson,
+        "reflect_goal_achieved": bool(state.get("reflect_goal_achieved", True)),
+        "reflect_missing_info": state.get("reflect_missing_info", ""),
+        "reflect_judge_source": state.get("reflect_judge_source", "rule_fallback"),
         "memory_lessons": state.get("memory_lessons", []),
         "memory_hits": state.get("memory_hits", 0),
         "environment_name": environment_name,
@@ -753,6 +925,9 @@ async def run_agent_workflow(
             "action_space": ["chat", "rag", "tool"],
             "last_reward": 0.0,
             "total_reward": 0.0,
+            "reflect_goal_achieved": False,
+            "reflect_missing_info": "",
+            "reflect_judge_source": "rule_fallback",
         }
     )
     return result
