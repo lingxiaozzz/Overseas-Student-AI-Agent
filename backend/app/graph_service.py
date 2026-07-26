@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import Literal, TypedDict
+from typing import Any, Literal, TypedDict
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.chat_service import MissingApiKeyError
 from app.config import settings
-from app.environment import Action, clear_env, get_or_create_env, reset_env
+from app.environment import Action, Observation, clear_env, get_or_create_env, reset_env
 from app.evaluator_service import compose_candidate_answer, llm_evaluate, rule_evaluate
 from app.logging_service import get_logger
 from app.memory_service import (
@@ -73,32 +73,53 @@ Return strict JSON with:
 - reason: one short sentence explaining the routing choice."""
 
 PLANNER_PROMPT = """You are a hierarchical planner for an international student assistant.
-Decompose the user goal into executable subgoals.
+Propose soft subgoal hints for the actor. The actor will re-decide each step from fresh observations.
 
 Rules:
-1) Simple single-intent questions should produce exactly 1 subgoal (copy/refine the user ask).
-2) Complex multi-part goals may produce 2-4 subgoals.
-3) Keep each subgoal concrete and independently actionable.
+1) Simple single-intent questions should produce exactly 1 hint (copy/refine the user ask).
+2) Complex multi-part goals may produce 2-4 ordered hints.
+3) Keep each hint concrete and independently actionable.
 4) Do not invent unrelated tasks.
 5) Prefer retrieval before generation when policy/onboarding facts are needed.
 6) If prior experience lessons are provided, reuse useful strategy patterns and avoid previously failed approaches.
 7) If long-term profile facts are provided, respect student constraints (budget, campus, housing, etc.).
+8) Hints are guidance only; the actor may adapt, skip, or replace them based on observations.
 
 Return strict JSON with:
 - goal: short restatement of the overall goal
-- subgoals: ordered list of 1-4 subgoal strings"""
+- subgoals: ordered list of 1-4 soft hint strings"""
+
+ACTOR_PROMPT = """You are an Observation→Action policy for an international student assistant.
+Given the latest observation, choose exactly ONE next action.
+
+Available action types:
+- rag: need official/onboarding/policy facts from the knowledge base
+- tool: need calculation/lookup tools (budget, weather, exchange, etc.)
+- chat: conversational acknowledgment or synthesis without retrieval/tools
+
+Rules:
+1) content must be a concrete executable instruction/question for this single step.
+2) Prefer unused plan hints when they still help the goal.
+3) Do not repeat a completed step unless the previous result failed or was empty.
+4) Do not pack multiple intents into one action.
+5) Respect available_actions from the observation.
+
+Return strict JSON with:
+- action_type: one of chat, rag, tool
+- content: executable string for this step
+- reason: one short sentence"""
 
 REFLECTOR_PROMPT = """You are a reflection judge for a hierarchical international-student agent.
 Evaluate whether the latest execution step advances the overall goal.
 
 Choose next_action:
-- continue: more planned subgoals remain and current progress is healthy
+- continue: more work is still needed; the actor will observe again and choose the next action
 - replan: current approach is stalled/wrong and a new remaining plan is needed
 - finish: overall goal is sufficiently satisfied or no useful work remains
 
 Rules:
 1) Prefer finish when the user goal is adequately answered.
-2) Prefer continue only if unfinished subgoals are still necessary.
+2) Prefer continue when unused plan hints remain or the latest answer is incomplete for a multi-part goal.
 3) Prefer replan only for clear failures (empty/irrelevant/blocked results).
 4) lesson must be an actionable strategy (route/tool preference), not a status sentence.
 5) missing_info should be brief; use empty string if none.
@@ -124,6 +145,12 @@ class PlanDecision(BaseModel):
     subgoals: list[str] = Field(default_factory=list)
 
 
+class NextActionDecision(BaseModel):
+    action_type: Route
+    content: str
+    reason: str = ""
+
+
 class ReflectionDecision(BaseModel):
     done: bool
     next_action: ReflectAction
@@ -145,6 +172,8 @@ class StepRecord(TypedDict, total=False):
     used_tools: list[str]
     reward: float
     action_type: str
+    observation_step_index: int
+    action_source: str
 
 
 class AgentState(TypedDict, total=False):
@@ -154,11 +183,15 @@ class AgentState(TypedDict, total=False):
     trace_id: str
     goal: str
     subgoals: list[str]
+    subgoal_hints: list[str]
     current_step: int
     max_steps: int
     step_results: list[StepRecord]
     route: Route
     router_reason: str
+    pending_action_content: str
+    action_decision_source: str
+    last_observation: dict[str, Any]
     answer: str
     sources: list[str]
     retrieved_contexts: list[RetrievedContext]
@@ -270,6 +303,33 @@ def _preview(text: str, limit: int = 180) -> str:
     if len(cleaned) <= limit:
         return cleaned
     return cleaned[: limit - 3] + "..."
+
+
+def _observation_to_dict(observation: Observation) -> dict[str, Any]:
+    extras = observation.extras or {}
+    return {
+        "goal": observation.goal,
+        "current_subgoal": observation.current_subgoal,
+        "step_index": observation.step_index,
+        "completed_steps": observation.completed_steps,
+        "available_actions": list(observation.available_actions),
+        "last_answer_preview": str(extras.get("last_answer_preview", "")),
+        "last_reward": float(extras.get("last_reward", 0.0) or 0.0),
+        "last_tools": list(extras.get("last_tools", [])),
+        "last_sources": list(extras.get("last_sources", [])),
+    }
+
+
+def _plan_hints(state: AgentState) -> list[str]:
+    hints = state.get("subgoal_hints") or state.get("subgoals") or []
+    return [item for item in hints if item and str(item).strip()]
+
+
+def _step_budget_remaining(state: AgentState) -> int:
+    return max(
+        int(state.get("max_steps", settings.max_plan_steps)) - int(state.get("current_step", 0)),
+        0,
+    )
 
 
 async def _llm_route(message: str, chat_history: str) -> RouterDecision:
@@ -440,12 +500,16 @@ async def _plan_node(state: AgentState) -> AgentState:
         return {
             "goal": goal,
             "subgoals": subgoals,
+            "subgoal_hints": subgoals,
             "current_step": 0,
             "max_steps": max_steps,
             "step_results": [],
             "replanned": False,
             "steps_used": 0,
             "tool_calls": 0,
+            "pending_action_content": "",
+            "action_decision_source": "hint_fallback",
+            "last_observation": _observation_to_dict(observation),
             "reflect_done": False,
             "reflect_next_action": "continue",
             "reflect_progress": 0.0,
@@ -467,29 +531,33 @@ async def _plan_node(state: AgentState) -> AgentState:
         logger.warning(f"trace_id={trace_id} plan_fallback=single_step reason=llm_planner_unavailable")
 
     # Keep environment goal aligned with planner restatement.
-    reset_env(
+    observation = reset_env(
         trace_id=trace_id,
         goal=goal,
         chat_history=chat_history,
         environment_name=environment_name,
     )
     logger.trace(
-        f"trace_id={trace_id} plan_goal={_preview(goal, 80)} subgoals={len(subgoals)} "
+        f"trace_id={trace_id} plan_goal={_preview(goal, 80)} subgoal_hints={len(subgoals)} "
         f"env={environment_name} actions={action_space}"
     )
     return {
         "goal": goal,
         "subgoals": subgoals,
+        "subgoal_hints": subgoals,
         "current_step": 0,
         "max_steps": max_steps,
         "step_results": [],
         "replanned": False,
         "steps_used": 0,
         "tool_calls": 0,
+        "pending_action_content": "",
+        "action_decision_source": "hint_fallback",
+        "last_observation": _observation_to_dict(observation),
         "reflect_done": False,
         "reflect_next_action": "continue",
         "reflect_progress": 0.0,
-        "reflect_lesson": "Initial hierarchical plan created.",
+        "reflect_lesson": "Initial soft plan hints created for Observation→Action loop.",
         "environment_name": environment_name,
         "action_space": action_space,
         "last_reward": 0.0,
@@ -498,46 +566,172 @@ async def _plan_node(state: AgentState) -> AgentState:
     }
 
 
+async def _llm_next_action(
+    *,
+    goal: str,
+    chat_history: str,
+    observation: Observation,
+    hints: list[str],
+    step_results: list[StepRecord],
+    experience_context: str,
+) -> NextActionDecision:
+    if not settings.google_api_key:
+        raise MissingApiKeyError("GOOGLE_API_KEY is not set.")
+
+    completed = "\n".join(
+        f"- step {item.get('step_index')}: [{item.get('route')}] {_preview(str(item.get('subgoal', '')), 120)} "
+        f"-> {_preview(str(item.get('answer', '')), 160)}"
+        for item in step_results
+    ) or "- none"
+    unused_hints = hints[len(step_results) :]
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", ACTOR_PROMPT),
+            (
+                "human",
+                "Overall goal:\n{goal}\n\n"
+                "Conversation history:\n{chat_history}\n\n"
+                "Prior experience lessons:\n{experience_context}\n\n"
+                "Soft plan hints:\n{hints}\n\n"
+                "Unused hints:\n{unused_hints}\n\n"
+                "Completed steps:\n{completed}\n\n"
+                "Current observation:\n"
+                "- step_index: {step_index}\n"
+                "- completed_steps: {completed_steps}\n"
+                "- available_actions: {available_actions}\n"
+                "- last_answer_preview: {last_answer_preview}\n"
+                "- last_reward: {last_reward}\n"
+                "- last_tools: {last_tools}\n",
+            ),
+        ]
+    )
+    model = ChatGoogleGenerativeAI(
+        model=settings.gemini_model,
+        google_api_key=settings.google_api_key,
+        temperature=0,
+    ).with_structured_output(NextActionDecision)
+    chain = prompt | model
+    extras = observation.extras or {}
+    return await with_retry(
+        lambda: chain.ainvoke(
+            {
+                "goal": goal,
+                "chat_history": chat_history or "No prior turns.",
+                "experience_context": experience_context or "No prior experience lessons.",
+                "hints": "\n".join(f"- {item}" for item in hints) or "- none",
+                "unused_hints": "\n".join(f"- {item}" for item in unused_hints) or "- none",
+                "completed": completed,
+                "step_index": observation.step_index,
+                "completed_steps": observation.completed_steps,
+                "available_actions": ", ".join(observation.available_actions),
+                "last_answer_preview": str(extras.get("last_answer_preview", "")) or "none",
+                "last_reward": float(extras.get("last_reward", 0.0) or 0.0),
+                "last_tools": ", ".join(extras.get("last_tools", [])) or "none",
+            }
+        )
+    )
+
+
+async def _fallback_next_action(
+    state: AgentState,
+    observation: Observation,
+    *,
+    source: str = "hint_fallback",
+) -> tuple[NextActionDecision, str]:
+    hints = _plan_hints(state)
+    current_step = int(state.get("current_step", 0))
+    goal = state.get("goal", state.get("message", ""))
+    content = hints[current_step] if current_step < len(hints) else goal
+    decision = await _decide_route(content, state.get("chat_history", ""), state.get("trace_id", "n/a"))
+    return (
+        NextActionDecision(
+            action_type=decision.route,
+            content=content,
+            reason=f"{source}: {decision.reason}",
+        ),
+        source,
+    )
+
 
 async def _act_node(state: AgentState) -> AgentState:
-    subgoals = state.get("subgoals", [])
-    current_step = state.get("current_step", 0)
     chat_history = state.get("chat_history", "")
     trace_id = state.get("trace_id", "n/a")
+    environment_name = state.get("environment_name", "student_support")
+    current_step = int(state.get("current_step", 0))
+    max_steps = int(state.get("max_steps", settings.max_plan_steps))
+    goal = state.get("goal", state.get("message", ""))
+    hints = _plan_hints(state)
+    step_results = list(state.get("step_results", []))
 
-    if current_step >= len(subgoals):
+    env = get_or_create_env(trace_id, environment_name)
+    observation = env.observe()
+    observation_payload = _observation_to_dict(observation)
+
+    if current_step >= max_steps:
+        logger.trace(f"trace_id={trace_id} act_skip=max_steps current_step={current_step}")
         return {
             "route": state.get("route", "chat"),
-            "router_reason": state.get("router_reason", "No remaining subgoals."),
+            "router_reason": "Max steps reached; no further action selected.",
+            "pending_action_content": "",
+            "action_decision_source": "rule_fallback",
+            "last_observation": observation_payload,
+            "action_space": observation.available_actions,
         }
 
-    subgoal = subgoals[current_step]
-    decision = await _decide_route(subgoal, chat_history, trace_id)
+    source = "llm"
+    try:
+        decision = await _llm_next_action(
+            goal=goal,
+            chat_history=chat_history,
+            observation=observation,
+            hints=hints,
+            step_results=step_results,
+            experience_context=state.get("experience_context", "No prior experience lessons."),
+        )
+        content = (decision.content or "").strip() or (
+            hints[current_step] if current_step < len(hints) else goal
+        )
+        action_type = decision.action_type
+        if action_type not in observation.available_actions:
+            routed = await _decide_route(content, chat_history, trace_id)
+            action_type = routed.route
+            reason = f"Corrected invalid action_type; {routed.reason}"
+        else:
+            reason = decision.reason.strip() or "Observation→Action policy selected next step."
+        decision = NextActionDecision(action_type=action_type, content=content, reason=reason)
+    except Exception:
+        decision, source = await _fallback_next_action(state, observation, source="hint_fallback")
+        logger.warning(f"trace_id={trace_id} act_fallback={source} reason=llm_actor_unavailable")
+
     logger.trace(
-        f"trace_id={trace_id} act_step={current_step + 1} route={decision.route} "
-        f"subgoal={_preview(subgoal, 80)}"
+        f"trace_id={trace_id} act_step={current_step + 1} route={decision.action_type} "
+        f"source={source} content={_preview(decision.content, 80)}"
     )
     return {
-        "route": decision.route,
+        "route": decision.action_type,
         "router_reason": decision.reason,
+        "pending_action_content": decision.content,
+        "action_decision_source": source,
+        "last_observation": observation_payload,
+        "action_space": observation.available_actions,
     }
 
 
 async def _execute_node(state: AgentState) -> AgentState:
-    subgoals = state.get("subgoals", [])
     current_step = state.get("current_step", 0)
     route = state.get("route", "chat")
     router_reason = state.get("router_reason", "")
     trace_id = state.get("trace_id", "n/a")
     environment_name = state.get("environment_name", "student_support")
+    max_steps = int(state.get("max_steps", settings.max_plan_steps))
+    action_content = (state.get("pending_action_content") or "").strip()
 
-    if current_step >= len(subgoals):
-        return {}
+    if current_step >= max_steps or not action_content:
+        return {"last_observation": state.get("last_observation", {})}
 
-    subgoal = subgoals[current_step]
     env = get_or_create_env(trace_id, environment_name)
     step_result = await env.step(
-        Action(type=route, content=subgoal, reason=router_reason)
+        Action(type=route, content=action_content, reason=router_reason)
     )
     info = step_result.info
     answer = str(info.get("answer", ""))
@@ -550,7 +744,7 @@ async def _execute_node(state: AgentState) -> AgentState:
     step_results.append(
         {
             "step_index": current_step + 1,
-            "subgoal": subgoal,
+            "subgoal": action_content,
             "route": route,
             "router_reason": router_reason,
             "answer": answer,
@@ -560,6 +754,10 @@ async def _execute_node(state: AgentState) -> AgentState:
             "used_tools": used_tools,
             "reward": reward,
             "action_type": step_result.action.type,
+            "observation_step_index": int(
+                state.get("last_observation", {}).get("step_index", current_step)
+            ),
+            "action_source": str(state.get("action_decision_source", "rule_fallback")),
         }
     )
     steps_used = current_step + 1
@@ -582,20 +780,23 @@ async def _execute_node(state: AgentState) -> AgentState:
         "total_reward": total_reward,
         "action_space": env.action_space(),
         "environment_name": environment_name,
+        "last_observation": _observation_to_dict(step_result.observation),
+        "pending_action_content": "",
     }
 
 
 def _rule_reflect(state: AgentState) -> ReflectionDecision:
-    subgoals = state.get("subgoals", [])
+    hints = _plan_hints(state)
     current_step = state.get("current_step", 0)
     max_steps = state.get("max_steps", settings.max_plan_steps)
     step_results = state.get("step_results", [])
     replanned = state.get("replanned", False)
-    total = max(len(subgoals), 1)
-    progress = min(current_step / total, 1.0)
+    planned_total = max(len(hints), 1)
+    progress = min(current_step / planned_total, 1.0)
     last_answer = step_results[-1]["answer"] if step_results else ""
+    budget_left = _step_budget_remaining(state)
 
-    if current_step >= len(subgoals) or current_step >= max_steps:
+    if current_step >= max_steps:
         return ReflectionDecision(
             done=True,
             next_action="finish",
@@ -624,13 +825,33 @@ def _rule_reflect(state: AgentState) -> ReflectionDecision:
             missing_info="Latest step returned an empty answer.",
             lesson="Replan once after empty step outputs; avoid repeating the failed action path.",
         )
+    if current_step < len(hints) and budget_left > 0:
+        return ReflectionDecision(
+            done=False,
+            next_action="continue",
+            progress=progress,
+            goal_achieved=False,
+            missing_info="",
+            lesson=f"Continue Observation→Action loop ({current_step}/{len(hints)} hints covered).",
+        )
     return ReflectionDecision(
-        done=False,
-        next_action="continue",
-        progress=progress,
-        goal_achieved=False,
+        done=True,
+        next_action="finish",
+        progress=1.0,
+        goal_achieved=bool(last_answer.strip()),
         missing_info="",
-        lesson=f"Continue remaining subgoals ({current_step}/{len(subgoals)} completed).",
+        lesson=build_experience_lesson(
+            state.get("goal", state.get("message", "")),
+            routes=[item.get("route", "chat") for item in step_results],
+            tools=[
+                tool_name
+                for item in step_results
+                for tool_name in item.get("used_tools", [])
+            ],
+            success=bool(last_answer.strip()),
+            replanned=bool(replanned),
+            steps_used=current_step,
+        ),
     )
 
 
@@ -639,19 +860,18 @@ def _clamp_progress(value: float) -> float:
 
 
 def _apply_reflect_guards(state: AgentState, decision: ReflectionDecision) -> ReflectionDecision:
-    subgoals = state.get("subgoals", [])
     current_step = state.get("current_step", 0)
     max_steps = state.get("max_steps", settings.max_plan_steps)
     replanned = bool(state.get("replanned", False))
     step_results = state.get("step_results", [])
     last_answer = step_results[-1]["answer"] if step_results else ""
-    remaining = max(len(subgoals) - current_step, 0)
+    budget_left = _step_budget_remaining(state)
 
     next_action = decision.next_action
     done = decision.done
     progress = _clamp_progress(decision.progress)
 
-    if current_step >= len(subgoals) or current_step >= max_steps:
+    if current_step >= max_steps:
         next_action = "finish"
         done = True
         progress = 1.0
@@ -659,9 +879,9 @@ def _apply_reflect_guards(state: AgentState, decision: ReflectionDecision) -> Re
         next_action = "replan"
         done = False
     elif next_action == "replan" and replanned:
-        next_action = "continue" if remaining > 0 else "finish"
+        next_action = "continue" if budget_left > 0 else "finish"
         done = next_action == "finish"
-    elif next_action == "continue" and remaining <= 0:
+    elif next_action == "continue" and budget_left <= 0:
         next_action = "finish"
         done = True
         progress = 1.0
@@ -686,19 +906,21 @@ async def _llm_reflect(state: AgentState) -> ReflectionDecision:
 
     step_results = state.get("step_results", [])
     latest = step_results[-1] if step_results else {}
+    hints = _plan_hints(state)
     prompt = ChatPromptTemplate.from_messages(
         [
             ("system", REFLECTOR_PROMPT),
             (
                 "human",
                 "Overall goal:\n{goal}\n\n"
-                "Planned subgoals:\n{subgoals}\n\n"
-                "Completed steps: {current_step}/{total_steps}\n"
+                "Soft plan hints:\n{subgoals}\n\n"
+                "Completed steps: {current_step}/{max_steps} (hints={hint_count})\n"
                 "Already replanned: {replanned}\n"
-                "Latest subgoal:\n{latest_subgoal}\n"
+                "Latest action content:\n{latest_subgoal}\n"
                 "Latest route: {latest_route}\n"
                 "Latest tools: {latest_tools}\n"
-                "Latest answer preview:\n{latest_answer}\n",
+                "Latest answer preview:\n{latest_answer}\n"
+                "Latest observation preview:\n{observation}\n",
             ),
         ]
     )
@@ -708,19 +930,25 @@ async def _llm_reflect(state: AgentState) -> ReflectionDecision:
         temperature=0,
     ).with_structured_output(ReflectionDecision)
     chain = prompt | model
-    subgoals = state.get("subgoals", [])
+    observation = state.get("last_observation", {})
     return await with_retry(
         lambda: chain.ainvoke(
             {
                 "goal": state.get("goal", state.get("message", "")),
-                "subgoals": "\n".join(f"- {item}" for item in subgoals) or "- none",
+                "subgoals": "\n".join(f"- {item}" for item in hints) or "- none",
                 "current_step": state.get("current_step", 0),
-                "total_steps": len(subgoals),
+                "max_steps": state.get("max_steps", settings.max_plan_steps),
+                "hint_count": len(hints),
                 "replanned": bool(state.get("replanned", False)),
                 "latest_subgoal": latest.get("subgoal", ""),
                 "latest_route": latest.get("route", "unknown"),
                 "latest_tools": ", ".join(latest.get("used_tools", [])) or "none",
                 "latest_answer": _preview(str(latest.get("answer", "")), 500),
+                "observation": (
+                    f"completed_steps={observation.get('completed_steps', 0)}; "
+                    f"last_reward={observation.get('last_reward', 0.0)}; "
+                    f"last_answer_preview={_preview(str(observation.get('last_answer_preview', '')), 200)}"
+                ),
             }
         )
     )
@@ -772,22 +1000,24 @@ async def _replan_node(state: AgentState) -> AgentState:
         goal = state.get("goal", message)
         logger.warning(f"trace_id={trace_id} replan_fallback=single_step")
 
-    # Replace unfinished tail while keeping already completed step_results.
     completed = state.get("current_step", 0)
     logger.trace(
-        f"trace_id={trace_id} replan_new_subgoals={len(new_subgoals)} completed={completed}"
+        f"trace_id={trace_id} replan_new_hints={len(new_subgoals)} completed={completed}"
     )
     return {
         "goal": goal,
         "subgoals": new_subgoals,
+        "subgoal_hints": new_subgoals,
         "current_step": 0,
         "replanned": True,
         "reflect_next_action": "continue",
         "reflect_done": False,
-        "reflect_lesson": "Replanned remaining work after a stalled step.",
+        "reflect_lesson": "Replanned soft hints after a stalled Observation→Action step.",
         "step_results": [],
         "steps_used": 0,
         "tool_calls": 0,
+        "pending_action_content": "",
+        "action_decision_source": "hint_fallback",
     }
 
 
@@ -990,9 +1220,10 @@ async def _evaluate_node(state: AgentState) -> AgentState:
                 sources.append(source)
 
     plan_summary = (
-        f"subgoals={state.get('subgoals', [])}; "
+        f"hints={state.get('subgoal_hints', state.get('subgoals', []))}; "
         f"routes={[item.get('route') for item in step_results]}; "
-        f"tools={used_tools}"
+        f"tools={used_tools}; "
+        f"action_sources={[item.get('action_source') for item in step_results]}"
     )
 
     source = "llm"
@@ -1105,6 +1336,10 @@ async def run_agent_workflow(
             "persist_experience": persist_experience,
             "environment_name": environment_name,
             "action_space": ["chat", "rag", "tool"],
+            "subgoal_hints": [],
+            "pending_action_content": "",
+            "action_decision_source": "rule_fallback",
+            "last_observation": {},
             "last_reward": 0.0,
             "total_reward": 0.0,
             "reflect_goal_achieved": False,

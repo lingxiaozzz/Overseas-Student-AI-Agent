@@ -4,7 +4,7 @@ A production-oriented **LLM Agent runtime** for international student support.
 
 Built with **FastAPI + LangChain + LangGraph + FAISS + Gemini**, featuring:
 
-- Hierarchical planning (`plan -> act -> execute -> reflect`)
+- Hierarchical planning + dynamic Observation→Action loop
 - Observation-Action environment abstraction
 - Layered memory (working / long-term / experience) with read/write traces
 - World knowledge via RAG (separate from agent memory)
@@ -37,8 +37,8 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    Start[User Message + session_id] --> Plan[Plan\nDecompose goal into subgoals]
-    Plan --> Act[Act\nRoute current subgoal]
+    Start[User Message + session_id] --> Plan[Plan\nSoft subgoal hints]
+    Plan --> Act[Act\nObserve then choose next Action]
     Act --> Execute[Execute\nenv.step Action]
     Execute --> Reflect[Reflect\nLLM-as-judge]
     Reflect -->|continue| Act
@@ -185,8 +185,9 @@ Useful headers:
 
 `/agent-chat` returns:
 
-- `plan`: goal + subgoals
-- `steps`: per-step route/action/reward/tools
+- `plan`: goal + soft subgoal hints
+- `steps`: per-step route/action/reward/tools (actual executed actions)
+- `last_observation` / `last_action_decision`: Observation→Action transparency
 - `reflection`: LLM judge result (`continue/replan/finish`, lesson, `goal_achieved`)
 - `evaluation`: final-answer score/pass, feedback, and whether replan was triggered
 - `metrics`: steps, tool calls, replan flag, memory hits, rewards
@@ -199,10 +200,11 @@ Useful headers:
 
 ## Core Capabilities
 
-### Hierarchical planning
+### Hierarchical planning + Observation→Action loop
 - Runtime: `plan -> act -> execute -> reflect -> evaluate (-> replan) -> finalize`
-- Simple intents stay single-step; complex intents expand to multiple subgoals
-- Cap with `MAX_PLAN_STEPS`
+- Planner emits soft subgoal hints (not a hard-locked execution queue)
+- Each `act` step observes the environment, then chooses the next Action (`chat`/`rag`/`tool` + content)
+- Cap with `MAX_PLAN_STEPS`; response exposes `last_observation` and `last_action_decision`
 
 ### Environment abstraction
 - Unified Observation-Action interface in `environment.py`

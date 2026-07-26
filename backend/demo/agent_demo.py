@@ -146,6 +146,20 @@ def print_case_result(
         "environment: "
         f"{environment.get('name')} action_space={environment.get('action_space')}"
     )
+    observation = response.get("last_observation") or {}
+    action_decision = response.get("last_action_decision") or {}
+    print(
+        "last_observation: "
+        f"completed={observation.get('completed_steps')} "
+        f"reward={observation.get('last_reward')} "
+        f"preview={observation.get('last_answer_preview')}"
+    )
+    print(
+        "last_action_decision: "
+        f"[{action_decision.get('action_type')}] "
+        f"source={action_decision.get('source')} "
+        f"| {action_decision.get('content')}"
+    )
     if response.get("long_term_facts"):
         print(f"long_term_facts: {response.get('long_term_facts')}")
     if response.get("memory_lessons"):

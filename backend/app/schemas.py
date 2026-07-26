@@ -80,6 +80,23 @@ class EnvironmentInfo(BaseModel):
     action_space: list[str]
 
 
+class ObservationInfo(BaseModel):
+    goal: str = ""
+    current_subgoal: str = ""
+    step_index: int = 0
+    completed_steps: int = 0
+    available_actions: list[str] = Field(default_factory=list)
+    last_answer_preview: str = ""
+    last_reward: float = 0.0
+
+
+class ActionDecisionInfo(BaseModel):
+    action_type: Route = "chat"
+    content: str = ""
+    reason: str = ""
+    source: Literal["llm", "hint_fallback", "rule_fallback"] = "rule_fallback"
+
+
 class MemoryEvent(BaseModel):
     layer: Literal["working", "long_term", "experience"]
     operation: Literal["read", "write"]
@@ -111,3 +128,5 @@ class AgentChatResponse(RagChatResponse):
     memory_writes: list[MemoryEvent] = Field(default_factory=list)
     long_term_facts: list[str] = Field(default_factory=list)
     environment: EnvironmentInfo
+    last_observation: ObservationInfo = Field(default_factory=ObservationInfo)
+    last_action_decision: ActionDecisionInfo = Field(default_factory=ActionDecisionInfo)

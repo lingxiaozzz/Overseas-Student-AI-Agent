@@ -10,6 +10,7 @@ from app.logging_service import get_logger
 from app.memory_service import append_turn, get_chat_history_text, write_working_memory
 from app.rag_service import KnowledgeBaseNotFoundError, generate_rag_response
 from app.schemas import (
+    ActionDecisionInfo,
     AgentChatResponse,
     AgentMetrics,
     AgentPlan,
@@ -18,6 +19,7 @@ from app.schemas import (
     EnvironmentInfo,
     EvaluationInfo,
     MemoryEvent,
+    ObservationInfo,
     PlanStepResult,
     RagChatResponse,
     ReflectionInfo,
@@ -215,5 +217,38 @@ async def agent_chat(request: ChatRequest, http_request: Request) -> AgentChatRe
         environment=EnvironmentInfo(
             name=result.get("environment_name", "student_support"),
             action_space=list(result.get("action_space", ["chat", "rag", "tool"])),
+        ),
+        last_observation=ObservationInfo(
+            goal=str((result.get("last_observation") or {}).get("goal", result.get("goal", ""))),
+            current_subgoal=str((result.get("last_observation") or {}).get("current_subgoal", "")),
+            step_index=int((result.get("last_observation") or {}).get("step_index", 0)),
+            completed_steps=int((result.get("last_observation") or {}).get("completed_steps", 0)),
+            available_actions=list(
+                (result.get("last_observation") or {}).get(
+                    "available_actions",
+                    result.get("action_space", ["chat", "rag", "tool"]),
+                )
+            ),
+            last_answer_preview=str(
+                (result.get("last_observation") or {}).get("last_answer_preview", "")
+            ),
+            last_reward=float((result.get("last_observation") or {}).get("last_reward", 0.0)),
+        ),
+        last_action_decision=ActionDecisionInfo(
+            action_type=(step_results[-1]["route"] if step_results else result.get("route", "chat")),
+            content=str(step_results[-1]["subgoal"] if step_results else ""),
+            reason=str(
+                step_results[-1]["router_reason"]
+                if step_results
+                else result.get("router_reason", "")
+            ),
+            source=(
+                step_results[-1].get(
+                    "action_source",
+                    result.get("action_decision_source", "rule_fallback"),
+                )
+                if step_results
+                else result.get("action_decision_source", "rule_fallback")
+            ),
         ),
     )

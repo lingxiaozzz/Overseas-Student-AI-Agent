@@ -97,6 +97,10 @@ class StudentSupportEnvironment(BaseEnvironment):
         return self.observe()
 
     def observe(self) -> Observation:
+        last_answer = str(self._last_info.get("answer", "") or "")
+        preview = " ".join(last_answer.split())
+        if len(preview) > 240:
+            preview = preview[:237] + "..."
         return Observation(
             goal=self._goal,
             current_subgoal=self._current_subgoal,
@@ -108,6 +112,8 @@ class StudentSupportEnvironment(BaseEnvironment):
                 "environment": self.name,
                 "last_tools": list(self._last_info.get("used_tools", [])),
                 "last_sources": list(self._last_info.get("sources", [])),
+                "last_reward": float(self._last_info.get("reward", 0.0) or 0.0),
+                "last_answer_preview": preview,
             },
         )
 
