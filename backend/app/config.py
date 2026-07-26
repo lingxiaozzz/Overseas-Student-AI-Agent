@@ -35,9 +35,22 @@ class Settings:
         "yes",
         "on",
     }
+    long_term_memory_enabled: bool = os.getenv("LONG_TERM_MEMORY_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    long_term_memory_max_items: int = int(os.getenv("LONG_TERM_MEMORY_MAX_ITEMS", "100"))
+    long_term_memory_top_k: int = int(os.getenv("LONG_TERM_MEMORY_TOP_K", "5"))
+    long_term_memory_min_score: float = float(os.getenv("LONG_TERM_MEMORY_MIN_SCORE", "0.1"))
+    long_term_memory_max_facts_per_write: int = int(
+        os.getenv("LONG_TERM_MEMORY_MAX_FACTS_PER_WRITE", "3")
+    )
     evaluation_pass_score: float = float(os.getenv("EVALUATION_PASS_SCORE", "0.6"))
     knowledge_base_path: Path = PROJECT_ROOT / "data" / "knowledge_base"
     experience_memory_path: Path = PROJECT_ROOT / "data" / "memory" / "experiences.json"
+    long_term_memory_path: Path = PROJECT_ROOT / "data" / "memory" / "long_term.json"
 
 
 settings = Settings()

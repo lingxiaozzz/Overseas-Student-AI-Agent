@@ -6,7 +6,8 @@ Built with **FastAPI + LangChain + LangGraph + FAISS + Gemini**, featuring:
 
 - Hierarchical planning (`plan -> act -> execute -> reflect`)
 - Observation-Action environment abstraction
-- Layered memory (working / experience / world knowledge)
+- Layered memory (working / long-term / experience) with read/write traces
+- World knowledge via RAG (separate from agent memory)
 - LLM-as-judge reflection with guarded fallback
 - Tool calling + RAG + explainable routing
 - Trace-level observability and evaluation suites
@@ -27,6 +28,8 @@ flowchart LR
     Graph --> Reflect[LLM Reflection Judge]
     Reflect --> Mem
     RAG --> KB[(Knowledge Base)]
+    Mem --> Work[Working Memory]
+    Mem --> LT[(Long-term JSON)]
     Mem --> Exp[(Experience JSON)]
 ```
 
@@ -53,6 +56,7 @@ flowchart TD
 | Layer | Role | Storage |
 |---|---|---|
 | Working memory | Recent conversation turns | In-process by `session_id` |
+| Long-term memory | Durable student profile/constraints | `data/memory/long_term.json` |
 | Experience memory | Task lessons for future planning | `data/memory/experiences.json` |
 | World knowledge | Policies/checklists/facts | `data/knowledge_base` + FAISS |
 
@@ -65,7 +69,7 @@ backend/
     graph_service.py   # LangGraph plan-act-reflect-evaluate runtime
     environment.py     # Observation-Action environment interface
     evaluator_service.py # Final-answer scoring + pass/fail
-    memory_service.py  # Working + experience memory
+    memory_service.py  # Working + long-term + experience memory
     chat_service.py    # Direct chat
     rag_service.py     # RAG + FAISS retrieval
     tool_service.py    # Tool calling
@@ -80,7 +84,7 @@ backend/
     task_eval.py       # Task success / steps / tools evaluation
 data/
   knowledge_base/      # World knowledge markdown
-  memory/              # Experience memory artifacts
+  memory/              # Long-term + experience memory artifacts
 ```
 
 ## Setup
@@ -187,6 +191,8 @@ Useful headers:
 - `evaluation`: final-answer score/pass, feedback, and whether replan was triggered
 - `metrics`: steps, tool calls, replan flag, memory hits, rewards
 - `memory_lessons`: retrieved experience lessons
+- `memory_reads` / `memory_writes`: Working / Long-term / Experience access trace
+- `long_term_facts`: long-term facts loaded for this turn
 - `environment`: `{ name, action_space }`
 - `sources` / `retrieved_contexts`: RAG explainability
 - `used_tools`: executed tools
@@ -213,11 +219,13 @@ Useful headers:
 - Fail once triggers replan (`evaluation.triggered_replan=true`, `metrics.replanned=true`)
 - Second failure finalizes with score/feedback instead of infinite loops
 
-### Memory
-- Working memory by `session_id`
-- Experience memory persistence + retrieval for planning
-- World knowledge via FAISS RAG
-- Eval/demo sessions can disable writes (`x-persist-experience: false`)
+### Memory (3 layers)
+- **Working memory**: short-term session turns (`MEMORY_MAX_TURNS`)
+- **Long-term memory**: durable student profile/constraints (`data/memory/long_term.json`)
+- **Experience memory**: reusable strategy lessons (`data/memory/experiences.json`)
+- Each `/agent-chat` turn returns `memory_reads` + `memory_writes` with layer/status/count/items
+- World knowledge remains separate via FAISS RAG
+- Eval/demo sessions can disable durable writes (`x-persist-experience: false`)
 
 ### Observability
 - Structured logs with `trace_id`

@@ -80,6 +80,15 @@ class EnvironmentInfo(BaseModel):
     action_space: list[str]
 
 
+class MemoryEvent(BaseModel):
+    layer: Literal["working", "long_term", "experience"]
+    operation: Literal["read", "write"]
+    status: Literal["hit", "miss", "wrote", "updated", "skipped", "deduped"]
+    detail: str = ""
+    count: int = 0
+    items: list[str] = Field(default_factory=list)
+
+
 class EvaluationInfo(BaseModel):
     passed: bool
     score: float
@@ -98,4 +107,7 @@ class AgentChatResponse(RagChatResponse):
     evaluation: EvaluationInfo
     metrics: AgentMetrics
     memory_lessons: list[str] = Field(default_factory=list)
+    memory_reads: list[MemoryEvent] = Field(default_factory=list)
+    memory_writes: list[MemoryEvent] = Field(default_factory=list)
+    long_term_facts: list[str] = Field(default_factory=list)
     environment: EnvironmentInfo

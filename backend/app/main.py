@@ -7,7 +7,7 @@ from app.chat_service import MissingApiKeyError, generate_chat_response
 from app.config import settings
 from app.graph_service import run_agent_workflow
 from app.logging_service import get_logger
-from app.memory_service import append_turn, get_chat_history_text
+from app.memory_service import append_turn, get_chat_history_text, write_working_memory
 from app.rag_service import KnowledgeBaseNotFoundError, generate_rag_response
 from app.schemas import (
     AgentChatResponse,
@@ -17,6 +17,7 @@ from app.schemas import (
     ChatResponse,
     EnvironmentInfo,
     EvaluationInfo,
+    MemoryEvent,
     PlanStepResult,
     RagChatResponse,
     ReflectionInfo,
@@ -145,13 +146,17 @@ async def agent_chat(request: ChatRequest, http_request: Request) -> AgentChatRe
             detail=str(exc),
         ) from exc
 
-    append_turn(request.session_id, request.message, result["answer"])
+    working_write = write_working_memory(request.session_id, request.message, result["answer"])
+    memory_writes = list(result.get("memory_writes", []))
+    memory_writes.append(working_write)
+    memory_reads = list(result.get("memory_reads", []))
     elapsed_ms = int((perf_counter() - start) * 1000)
     steps_used = result.get("steps_used", len(result.get("step_results", [])))
     logger.info(
         f"trace_id={trace_id} endpoint=/agent-chat session_id={request.session_id} "
         f"route={result['route']} steps={steps_used} used_tools={result.get('used_tools', [])} "
         f"sources={len(result.get('sources', []))} contexts={len(result.get('retrieved_contexts', []))} "
+        f"memory_reads={len(memory_reads)} memory_writes={len(memory_writes)} "
         f"elapsed_ms={elapsed_ms}"
     )
     step_results = result.get("step_results", [])
@@ -204,6 +209,9 @@ async def agent_chat(request: ChatRequest, http_request: Request) -> AgentChatRe
             total_reward=float(result.get("total_reward", 0.0)),
         ),
         memory_lessons=list(result.get("memory_lessons", [])),
+        memory_reads=[MemoryEvent(**item) for item in memory_reads],
+        memory_writes=[MemoryEvent(**item) for item in memory_writes],
+        long_term_facts=list(result.get("long_term_facts", [])),
         environment=EnvironmentInfo(
             name=result.get("environment_name", "student_support"),
             action_space=list(result.get("action_space", ["chat", "rag", "tool"])),

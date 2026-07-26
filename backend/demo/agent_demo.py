@@ -146,8 +146,25 @@ def print_case_result(
         "environment: "
         f"{environment.get('name')} action_space={environment.get('action_space')}"
     )
+    if response.get("long_term_facts"):
+        print(f"long_term_facts: {response.get('long_term_facts')}")
     if response.get("memory_lessons"):
         print(f"memory_lessons: {response.get('memory_lessons')}")
+    reads = response.get("memory_reads") or []
+    writes = response.get("memory_writes") or []
+    if reads or writes:
+        print("memory_reads:")
+        for event in reads:
+            print(
+                f"  - [{event.get('layer')}] {event.get('status')} "
+                f"count={event.get('count')} | {event.get('detail')}"
+            )
+        print("memory_writes:")
+        for event in writes:
+            print(
+                f"  - [{event.get('layer')}] {event.get('status')} "
+                f"count={event.get('count')} | {event.get('detail')}"
+            )
     if response.get("used_tools"):
         print(f"used_tools: {response.get('used_tools')}")
     if response.get("sources"):

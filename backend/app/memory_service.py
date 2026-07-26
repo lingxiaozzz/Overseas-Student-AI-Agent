@@ -6,10 +6,14 @@ from collections import defaultdict, deque
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import Any, Literal
 
 from app.config import settings
 
+
+MemoryLayer = Literal["working", "long_term", "experience"]
+MemoryOperation = Literal["read", "write"]
+MemoryStatus = Literal["hit", "miss", "wrote", "updated", "skipped", "deduped"]
 
 _MEMORY_LOCK = Lock()
 _SESSION_MEMORY: dict[str, deque[tuple[str, str]]] = defaultdict(
@@ -26,33 +30,32 @@ _LOW_VALUE_LESSON_MARKERS = (
     "single-step context acknowledgment",
 )
 _EVAL_SESSION_PREFIXES = ("route-eval", "eval-", "task-eval")
+_DURABLE_FACT_HINTS = (
+    "i am",
+    "i'm",
+    "i will study",
+    "i study",
+    "i live",
+    "my rent",
+    "my budget",
+    "international student",
+    "usyd",
+    "university of sydney",
+    "weekly rent",
+    "oshc",
+)
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _experience_path() -> Path:
     return settings.experience_memory_path
 
 
-def _load_experiences_unlocked() -> list[dict[str, Any]]:
-    path = _experience_path()
-    if not path.exists():
-        return []
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return []
-    if isinstance(payload, list):
-        return [item for item in payload if isinstance(item, dict)]
-    return []
-
-
-def _save_experiences_unlocked(records: list[dict[str, Any]]) -> None:
-    path = _experience_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(records, indent=2, ensure_ascii=False), encoding="utf-8")
-
-
-def _tokenize(text: str) -> set[str]:
-    return {token for token in _TOKEN_RE.findall(text.lower()) if len(token) > 2}
+def _long_term_path() -> Path:
+    return settings.long_term_memory_path
 
 
 def _preview(text: str, limit: int = 72) -> str:
@@ -60,6 +63,29 @@ def _preview(text: str, limit: int = 72) -> str:
     if len(cleaned) <= limit:
         return cleaned
     return cleaned[: limit - 3] + "..."
+
+
+def _tokenize(text: str) -> set[str]:
+    return {token for token in _TOKEN_RE.findall(text.lower()) if len(token) > 2}
+
+
+def make_memory_event(
+    *,
+    layer: MemoryLayer,
+    operation: MemoryOperation,
+    status: MemoryStatus,
+    detail: str,
+    count: int = 0,
+    items: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "layer": layer,
+        "operation": operation,
+        "status": status,
+        "detail": detail,
+        "count": count,
+        "items": list(items or []),
+    }
 
 
 def is_low_value_lesson(lesson: str) -> bool:
@@ -73,6 +99,15 @@ def should_persist_experience(session_id: str, persist_experience: bool = True) 
     if not persist_experience:
         return False
     if not settings.experience_memory_enabled:
+        return False
+    session_lower = session_id.strip().lower()
+    return not any(session_lower.startswith(prefix) for prefix in _EVAL_SESSION_PREFIXES)
+
+
+def should_persist_long_term(session_id: str, persist_experience: bool = True) -> bool:
+    if not persist_experience:
+        return False
+    if not settings.long_term_memory_enabled:
         return False
     session_lower = session_id.strip().lower()
     return not any(session_lower.startswith(prefix) for prefix in _EVAL_SESSION_PREFIXES)
@@ -121,6 +156,54 @@ def _fingerprint(goal: str, routes: list[str], tools: list[str]) -> str:
     )
 
 
+def _load_experiences_unlocked() -> list[dict[str, Any]]:
+    path = _experience_path()
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    return []
+
+
+def _save_experiences_unlocked(records: list[dict[str, Any]]) -> None:
+    path = _experience_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(records, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _load_long_term_unlocked() -> dict[str, list[dict[str, Any]]]:
+    path = _long_term_path()
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    cleaned: dict[str, list[dict[str, Any]]] = {}
+    for session_id, records in payload.items():
+        if not isinstance(session_id, str) or not isinstance(records, list):
+            continue
+        cleaned[session_id] = [item for item in records if isinstance(item, dict)]
+    return cleaned
+
+
+def _save_long_term_unlocked(store: dict[str, list[dict[str, Any]]]) -> None:
+    path = _long_term_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(store, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def get_working_turn_count(session_id: str) -> int:
+    with _MEMORY_LOCK:
+        return len(_SESSION_MEMORY[session_id])
+
+
 def get_chat_history_text(session_id: str) -> str:
     with _MEMORY_LOCK:
         turns = list(_SESSION_MEMORY[session_id])
@@ -132,13 +215,37 @@ def get_chat_history_text(session_id: str) -> str:
     for user_message, assistant_message in turns:
         lines.append(f"User: {user_message}")
         lines.append(f"Assistant: {assistant_message}")
-
     return "\n".join(lines)
 
 
-def get_working_turn_count(session_id: str) -> int:
+def read_working_memory(session_id: str) -> tuple[str, dict[str, Any]]:
+    turns = get_working_turn_count(session_id)
+    text = get_chat_history_text(session_id)
+    if turns <= 0:
+        event = make_memory_event(
+            layer="working",
+            operation="read",
+            status="miss",
+            detail=f"No working-memory turns for session '{session_id}'.",
+            count=0,
+        )
+        return text, event
+
+    items = []
     with _MEMORY_LOCK:
-        return len(_SESSION_MEMORY[session_id])
+        recent = list(_SESSION_MEMORY[session_id])[-2:]
+    for user_message, assistant_message in recent:
+        items.append(f"U:{_preview(user_message, 40)} | A:{_preview(assistant_message, 40)}")
+
+    event = make_memory_event(
+        layer="working",
+        operation="read",
+        status="hit",
+        detail=f"Loaded {turns} working-memory turn(s) for session '{session_id}'.",
+        count=turns,
+        items=items,
+    )
+    return text, event
 
 
 def append_turn(session_id: str, user_message: str, assistant_message: str) -> None:
@@ -146,58 +253,202 @@ def append_turn(session_id: str, user_message: str, assistant_message: str) -> N
         _SESSION_MEMORY[session_id].append((user_message, assistant_message))
 
 
-def append_experience(
+def write_working_memory(
     session_id: str,
-    goal: str,
-    lesson: str,
+    user_message: str,
+    assistant_message: str,
+) -> dict[str, Any]:
+    append_turn(session_id, user_message, assistant_message)
+    turns = get_working_turn_count(session_id)
+    return make_memory_event(
+        layer="working",
+        operation="write",
+        status="wrote",
+        detail=f"Appended 1 turn to working memory (size={turns}/{settings.memory_max_turns}).",
+        count=1,
+        items=[f"U:{_preview(user_message, 48)} | A:{_preview(assistant_message, 48)}"],
+    )
+
+
+def extract_long_term_candidates(message: str) -> list[str]:
+    """Heuristic durable-fact extractor for student profile / constraints."""
+    text = " ".join(message.split()).strip()
+    if len(text) < 8:
+        return []
+
+    clauses = [part.strip(" .;") for part in re.split(r"[.\n;]+", text) if part.strip()]
+    candidates: list[str] = []
+    for clause in clauses:
+        lower = clause.lower()
+        if len(clause) < 8 or len(clause) > 220:
+            continue
+        if lower.startswith(("what ", "how ", "can you", "could you", "please ")):
+            continue
+        if any(hint in lower for hint in _DURABLE_FACT_HINTS):
+            candidates.append(clause)
+
+    # Deduplicate while preserving order.
+    seen: set[str] = set()
+    unique: list[str] = []
+    for item in candidates:
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return unique[: settings.long_term_memory_max_facts_per_write]
+
+
+def format_long_term_context(records: list[dict[str, Any]]) -> str:
+    if not records:
+        return "No long-term profile facts."
+    lines: list[str] = []
+    for index, record in enumerate(records, start=1):
+        fact = str(record.get("fact", "")).strip()
+        if fact:
+            lines.append(f"{index}. {fact}")
+    return "\n".join(lines) if lines else "No long-term profile facts."
+
+
+def retrieve_long_term(
+    session_id: str,
+    query: str,
     *,
-    routes: list[str] | None = None,
-    tools: list[str] | None = None,
-    success: bool = True,
-    steps_used: int = 0,
-    persist_experience: bool = True,
-) -> dict[str, Any] | None:
-    routes = routes or []
-    tools = tools or []
-    lesson = lesson.strip()
-
-    if not should_persist_experience(session_id, persist_experience=persist_experience):
-        return None
-    if is_low_value_lesson(lesson):
-        return None
-
-    record = {
-        "session_id": session_id,
-        "goal": goal,
-        "lesson": lesson,
-        "routes": routes,
-        "tools": tools,
-        "success": success,
-        "steps_used": steps_used,
-        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    }
-    fingerprint = _fingerprint(goal, routes, tools)
+    top_k: int | None = None,
+) -> list[dict[str, Any]]:
+    limit = top_k or settings.long_term_memory_top_k
+    query_tokens = _tokenize(query)
 
     with _MEMORY_LOCK:
-        records = _load_experiences_unlocked()
-        for existing in reversed(records):
-            existing_fp = _fingerprint(
-                str(existing.get("goal", "")),
-                list(existing.get("routes", []) or []),
-                list(existing.get("tools", []) or []),
-            )
-            if existing_fp == fingerprint:
-                # Refresh lesson/timestamp for the duplicate instead of appending.
-                existing.update(record)
-                _save_experiences_unlocked(records)
-                return existing
+        store = _load_long_term_unlocked()
+        records = list(store.get(session_id, []))
 
-        records.append(record)
-        max_items = settings.experience_memory_max_items
+    if not records:
+        return []
+
+    scored: list[tuple[float, dict[str, Any]]] = []
+    for record in records:
+        fact = str(record.get("fact", ""))
+        tokens = _tokenize(fact)
+        if not tokens:
+            continue
+        if query_tokens:
+            overlap = len(query_tokens & tokens)
+            score = overlap / len(query_tokens) if overlap else 0.0
+        else:
+            overlap = 0
+            score = 0.0
+        # Keep recent same-session facts discoverable even with weak overlap.
+        score += 0.05
+        if score < settings.long_term_memory_min_score and overlap <= 0:
+            continue
+        scored.append((score, record))
+
+    if not scored:
+        # Fallback: most recent facts for this session.
+        return list(reversed(records))[:limit]
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return [record for _, record in scored[:limit]]
+
+
+def read_long_term_memory(
+    session_id: str,
+    query: str,
+) -> tuple[list[dict[str, Any]], str, dict[str, Any]]:
+    records = retrieve_long_term(session_id, query)
+    context = format_long_term_context(records)
+    facts = [str(item.get("fact", "")).strip() for item in records if str(item.get("fact", "")).strip()]
+    if not records:
+        event = make_memory_event(
+            layer="long_term",
+            operation="read",
+            status="miss",
+            detail=f"No long-term facts matched for session '{session_id}'.",
+            count=0,
+        )
+    else:
+        event = make_memory_event(
+            layer="long_term",
+            operation="read",
+            status="hit",
+            detail=f"Retrieved {len(records)} long-term fact(s) for session '{session_id}'.",
+            count=len(records),
+            items=[_preview(fact, 80) for fact in facts],
+        )
+    return records, context, event
+
+
+def upsert_long_term_facts(
+    session_id: str,
+    facts: list[str],
+    *,
+    persist_experience: bool = True,
+    source: str = "user_message",
+) -> dict[str, Any]:
+    cleaned = [fact.strip() for fact in facts if fact and fact.strip()]
+    if not cleaned:
+        return make_memory_event(
+            layer="long_term",
+            operation="write",
+            status="skipped",
+            detail="No durable facts extracted for long-term memory.",
+            count=0,
+        )
+    if not should_persist_long_term(session_id, persist_experience=persist_experience):
+        return make_memory_event(
+            layer="long_term",
+            operation="write",
+            status="skipped",
+            detail="Long-term write skipped (disabled or eval/demo session).",
+            count=0,
+            items=[_preview(item, 60) for item in cleaned[:3]],
+        )
+
+    wrote = 0
+    updated = 0
+    with _MEMORY_LOCK:
+        store = _load_long_term_unlocked()
+        records = list(store.get(session_id, []))
+        by_fact = {
+            str(item.get("fact", "")).strip().lower(): item
+            for item in records
+            if str(item.get("fact", "")).strip()
+        }
+        for fact in cleaned:
+            key = fact.lower()
+            if key in by_fact:
+                by_fact[key]["updated_at"] = _utc_now()
+                by_fact[key]["source"] = source
+                updated += 1
+            else:
+                record = {
+                    "fact": fact,
+                    "source": source,
+                    "created_at": _utc_now(),
+                    "updated_at": _utc_now(),
+                }
+                records.append(record)
+                by_fact[key] = record
+                wrote += 1
+
+        max_items = settings.long_term_memory_max_items
         if len(records) > max_items:
             records = records[-max_items:]
-        _save_experiences_unlocked(records)
-    return record
+        store[session_id] = records
+        _save_long_term_unlocked(store)
+
+    status: MemoryStatus = "updated" if updated and not wrote else "wrote"
+    if updated and wrote:
+        status = "wrote"
+    return make_memory_event(
+        layer="long_term",
+        operation="write",
+        status=status,
+        detail=f"Long-term memory write: created={wrote}, updated={updated}.",
+        count=wrote + updated,
+        items=[_preview(item, 70) for item in cleaned],
+    )
 
 
 def retrieve_experiences(
@@ -229,7 +480,6 @@ def retrieve_experiences(
         score = overlap / len(query_tokens)
         if score < settings.experience_memory_min_score:
             continue
-        # Prefer same-session experiences slightly.
         if session_id and record.get("session_id") == session_id:
             score += 0.2
         if record.get("success") is False:
@@ -256,3 +506,157 @@ def format_experience_context(records: list[dict[str, Any]]) -> str:
             f"{index}. goal={goal}; lesson={lesson}; routes={routes}; tools={tools}"
         )
     return "\n".join(lines)
+
+
+def read_experience_memory(
+    query: str,
+    session_id: str | None = None,
+) -> tuple[list[dict[str, Any]], str, dict[str, Any]]:
+    records = retrieve_experiences(query, session_id=session_id)
+    context = format_experience_context(records)
+    lessons = [
+        str(item.get("lesson", "")).strip()
+        for item in records
+        if str(item.get("lesson", "")).strip()
+    ]
+    if not records:
+        event = make_memory_event(
+            layer="experience",
+            operation="read",
+            status="miss",
+            detail="No experience lessons matched the current goal.",
+            count=0,
+        )
+    else:
+        event = make_memory_event(
+            layer="experience",
+            operation="read",
+            status="hit",
+            detail=f"Retrieved {len(records)} experience lesson(s).",
+            count=len(records),
+            items=[_preview(lesson, 80) for lesson in lessons],
+        )
+    return records, context, event
+
+
+def append_experience(
+    session_id: str,
+    goal: str,
+    lesson: str,
+    *,
+    routes: list[str] | None = None,
+    tools: list[str] | None = None,
+    success: bool = True,
+    steps_used: int = 0,
+    persist_experience: bool = True,
+) -> dict[str, Any] | None:
+    routes = routes or []
+    tools = tools or []
+    lesson = lesson.strip()
+
+    if not should_persist_experience(session_id, persist_experience=persist_experience):
+        return None
+    if is_low_value_lesson(lesson):
+        return None
+
+    record = {
+        "session_id": session_id,
+        "goal": goal,
+        "lesson": lesson,
+        "routes": routes,
+        "tools": tools,
+        "success": success,
+        "steps_used": steps_used,
+        "created_at": _utc_now(),
+    }
+    fingerprint = _fingerprint(goal, routes, tools)
+
+    with _MEMORY_LOCK:
+        records = _load_experiences_unlocked()
+        for existing in reversed(records):
+            existing_fp = _fingerprint(
+                str(existing.get("goal", "")),
+                list(existing.get("routes", []) or []),
+                list(existing.get("tools", []) or []),
+            )
+            if existing_fp == fingerprint:
+                existing.update(record)
+                _save_experiences_unlocked(records)
+                return existing
+
+        records.append(record)
+        max_items = settings.experience_memory_max_items
+        if len(records) > max_items:
+            records = records[-max_items:]
+        _save_experiences_unlocked(records)
+    return record
+
+
+def write_experience_memory(
+    session_id: str,
+    goal: str,
+    lesson: str,
+    *,
+    routes: list[str] | None = None,
+    tools: list[str] | None = None,
+    success: bool = True,
+    steps_used: int = 0,
+    persist_experience: bool = True,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    if not should_persist_experience(session_id, persist_experience=persist_experience):
+        return None, make_memory_event(
+            layer="experience",
+            operation="write",
+            status="skipped",
+            detail="Experience write skipped (disabled or eval/demo session).",
+            count=0,
+            items=[_preview(lesson, 70)] if lesson.strip() else [],
+        )
+    if is_low_value_lesson(lesson):
+        return None, make_memory_event(
+            layer="experience",
+            operation="write",
+            status="skipped",
+            detail="Experience write skipped (low-value lesson).",
+            count=0,
+            items=[_preview(lesson, 70)] if lesson.strip() else [],
+        )
+
+    before_count = 0
+    with _MEMORY_LOCK:
+        before_count = len(_load_experiences_unlocked())
+
+    record = append_experience(
+        session_id=session_id,
+        goal=goal,
+        lesson=lesson,
+        routes=routes,
+        tools=tools,
+        success=success,
+        steps_used=steps_used,
+        persist_experience=persist_experience,
+    )
+    if record is None:
+        return None, make_memory_event(
+            layer="experience",
+            operation="write",
+            status="skipped",
+            detail="Experience write skipped.",
+            count=0,
+        )
+
+    with _MEMORY_LOCK:
+        after_count = len(_load_experiences_unlocked())
+    status: MemoryStatus = "wrote" if after_count > before_count else "deduped"
+    return record, make_memory_event(
+        layer="experience",
+        operation="write",
+        status=status,
+        detail=(
+            "Experience lesson appended."
+            if status == "wrote"
+            else "Experience lesson deduped/updated existing fingerprint."
+        ),
+        count=1,
+        items=[_preview(str(record.get("lesson", "")), 80)],
+    )
