@@ -16,6 +16,7 @@ from app.schemas import (
     ChatRequest,
     ChatResponse,
     EnvironmentInfo,
+    EvaluationInfo,
     PlanStepResult,
     RagChatResponse,
     ReflectionInfo,
@@ -186,6 +187,13 @@ async def agent_chat(request: ChatRequest, http_request: Request) -> AgentChatRe
             goal_achieved=bool(result.get("reflect_goal_achieved", False)),
             missing_info=str(result.get("reflect_missing_info", "")),
             judge_source=result.get("reflect_judge_source", "rule_fallback"),
+        ),
+        evaluation=EvaluationInfo(
+            passed=bool(result.get("evaluation_passed", False)),
+            score=float(result.get("evaluation_score", 0.0)),
+            feedback=str(result.get("evaluation_feedback", "")),
+            source=result.get("evaluation_source", "rule_fallback"),
+            triggered_replan=bool(result.get("evaluation_triggered_replan", False)),
         ),
         metrics=AgentMetrics(
             steps_used=int(result.get("steps_used", len(step_results))),

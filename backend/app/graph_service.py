@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from app.chat_service import MissingApiKeyError
 from app.config import settings
 from app.environment import Action, clear_env, get_or_create_env, reset_env
+from app.evaluator_service import compose_candidate_answer, llm_evaluate, rule_evaluate
 from app.logging_service import get_logger
 from app.memory_service import (
     append_experience,
@@ -176,6 +177,12 @@ class AgentState(TypedDict, total=False):
     reflect_goal_achieved: bool
     reflect_missing_info: str
     reflect_judge_source: str
+    evaluation_passed: bool
+    evaluation_score: float
+    evaluation_feedback: str
+    evaluation_source: str
+    evaluation_triggered_replan: bool
+    evaluation_next_action: Literal["finalize", "replan"]
 
 
 SAFETY_HINT_KEYWORDS = {
@@ -785,6 +792,11 @@ async def _finalize_node(state: AgentState) -> AgentState:
             "action_space": state.get("action_space", ["chat", "rag", "tool"]),
             "last_reward": float(state.get("last_reward", 0.0)),
             "total_reward": float(state.get("total_reward", 0.0)),
+            "evaluation_passed": bool(state.get("evaluation_passed", False)),
+            "evaluation_score": float(state.get("evaluation_score", 0.0)),
+            "evaluation_feedback": state.get("evaluation_feedback", "No evaluation available."),
+            "evaluation_source": state.get("evaluation_source", "rule_fallback"),
+            "evaluation_triggered_replan": bool(state.get("evaluation_triggered_replan", False)),
         }
 
     if len(step_results) == 1:
@@ -856,14 +868,82 @@ async def _finalize_node(state: AgentState) -> AgentState:
         "action_space": state.get("action_space", ["chat", "rag", "tool"]),
         "last_reward": float(state.get("last_reward", 0.0)),
         "total_reward": float(state.get("total_reward", 0.0)),
+        "evaluation_passed": bool(state.get("evaluation_passed", True)),
+        "evaluation_score": float(state.get("evaluation_score", 0.0)),
+        "evaluation_feedback": state.get("evaluation_feedback", "No evaluation available."),
+        "evaluation_source": state.get("evaluation_source", "rule_fallback"),
+        "evaluation_triggered_replan": bool(state.get("evaluation_triggered_replan", False)),
     }
 
 
-def _after_reflect(state: AgentState) -> Literal["act", "replan", "finalize"]:
+def _after_reflect(state: AgentState) -> Literal["act", "replan", "evaluate"]:
     action = state.get("reflect_next_action", "finish")
     if action == "continue":
         return "act"
     if action == "replan" and not state.get("replanned", False):
+        return "replan"
+    return "evaluate"
+
+
+async def _evaluate_node(state: AgentState) -> AgentState:
+    trace_id = state.get("trace_id", "n/a")
+    goal = state.get("goal", state.get("message", ""))
+    step_results = state.get("step_results", [])
+    candidate = compose_candidate_answer(step_results)
+    used_tools: list[str] = []
+    sources: list[str] = []
+    for item in step_results:
+        for tool_name in item.get("used_tools", []):
+            if tool_name not in used_tools:
+                used_tools.append(tool_name)
+        for source in item.get("sources", []):
+            if source not in sources:
+                sources.append(source)
+
+    plan_summary = (
+        f"subgoals={state.get('subgoals', [])}; "
+        f"routes={[item.get('route') for item in step_results]}; "
+        f"tools={used_tools}"
+    )
+
+    source = "llm"
+    try:
+        decision = await llm_evaluate(goal=goal, answer=candidate, plan_summary=plan_summary)
+    except Exception:
+        source = "rule_fallback"
+        decision = rule_evaluate(
+            goal=goal,
+            answer=candidate,
+            used_tools=used_tools,
+            sources=sources,
+        )
+        logger.warning(f"trace_id={trace_id} evaluate_fallback=rule reason=llm_evaluator_unavailable")
+
+    already_replanned = bool(state.get("replanned", False))
+    previously_triggered = bool(state.get("evaluation_triggered_replan", False))
+    triggered_replan = (not decision.passed) and (not already_replanned)
+    next_action: Literal["finalize", "replan"] = "replan" if triggered_replan else "finalize"
+
+    logger.trace(
+        f"trace_id={trace_id} evaluate_score={decision.score:.2f} passed={decision.passed} "
+        f"source={source} next={next_action}"
+    )
+    return {
+        "answer": candidate,
+        "evaluation_passed": decision.passed,
+        "evaluation_score": float(decision.score),
+        "evaluation_feedback": decision.feedback,
+        "evaluation_source": source,
+        "evaluation_triggered_replan": previously_triggered or triggered_replan,
+        "evaluation_next_action": next_action,
+        "replanned": True if triggered_replan else already_replanned,
+        "used_tools": used_tools,
+        "sources": sources,
+    }
+
+
+def _after_evaluate(state: AgentState) -> Literal["finalize", "replan"]:
+    if state.get("evaluation_next_action") == "replan":
         return "replan"
     return "finalize"
 
@@ -875,6 +955,7 @@ def _build_agent_graph():
     graph.add_node("act", _act_node)
     graph.add_node("execute", _execute_node)
     graph.add_node("reflect", _reflect_node)
+    graph.add_node("evaluate", _evaluate_node)
     graph.add_node("replan", _replan_node)
     graph.add_node("finalize", _finalize_node)
 
@@ -888,7 +969,15 @@ def _build_agent_graph():
         {
             "act": "act",
             "replan": "replan",
+            "evaluate": "evaluate",
+        },
+    )
+    graph.add_conditional_edges(
+        "evaluate",
+        _after_evaluate,
+        {
             "finalize": "finalize",
+            "replan": "replan",
         },
     )
     graph.add_edge("replan", "act")
@@ -928,6 +1017,12 @@ async def run_agent_workflow(
             "reflect_goal_achieved": False,
             "reflect_missing_info": "",
             "reflect_judge_source": "rule_fallback",
+            "evaluation_passed": False,
+            "evaluation_score": 0.0,
+            "evaluation_feedback": "",
+            "evaluation_source": "rule_fallback",
+            "evaluation_triggered_replan": False,
+            "evaluation_next_action": "finalize",
         }
     )
     return result

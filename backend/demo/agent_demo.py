@@ -99,6 +99,7 @@ def print_case_result(
 ) -> None:
     plan = response.get("plan") or {}
     reflection = response.get("reflection") or {}
+    evaluation = response.get("evaluation") or {}
     metrics = response.get("metrics") or {}
     environment = response.get("environment") or {}
     steps = response.get("steps") or []
@@ -124,6 +125,14 @@ def print_case_result(
         f"achieved={reflection.get('goal_achieved')} "
         f"source={reflection.get('judge_source')} "
         f"lesson={reflection.get('lesson')}"
+    )
+    print(
+        "evaluation: "
+        f"passed={evaluation.get('passed')} "
+        f"score={evaluation.get('score')} "
+        f"source={evaluation.get('source')} "
+        f"triggered_replan={evaluation.get('triggered_replan')} "
+        f"feedback={evaluation.get('feedback')}"
     )
     print(
         "metrics: "

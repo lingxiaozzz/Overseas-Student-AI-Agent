@@ -35,6 +35,7 @@ class Settings:
         "yes",
         "on",
     }
+    evaluation_pass_score: float = float(os.getenv("EVALUATION_PASS_SCORE", "0.6"))
     knowledge_base_path: Path = PROJECT_ROOT / "data" / "knowledge_base"
     experience_memory_path: Path = PROJECT_ROOT / "data" / "memory" / "experiences.json"
 

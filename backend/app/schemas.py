@@ -80,6 +80,14 @@ class EnvironmentInfo(BaseModel):
     action_space: list[str]
 
 
+class EvaluationInfo(BaseModel):
+    passed: bool
+    score: float
+    feedback: str
+    source: Literal["llm", "rule_fallback"] = "rule_fallback"
+    triggered_replan: bool = False
+
+
 class AgentChatResponse(RagChatResponse):
     route: Route
     router_reason: str
@@ -87,6 +95,7 @@ class AgentChatResponse(RagChatResponse):
     plan: AgentPlan
     steps: list[PlanStepResult]
     reflection: ReflectionInfo
+    evaluation: EvaluationInfo
     metrics: AgentMetrics
     memory_lessons: list[str] = Field(default_factory=list)
     environment: EnvironmentInfo

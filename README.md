@@ -39,9 +39,12 @@ flowchart TD
     Act --> Execute[Execute\nenv.step Action]
     Execute --> Reflect[Reflect\nLLM-as-judge]
     Reflect -->|continue| Act
-    Reflect -->|replan| Plan2[Replan remaining work]
-    Plan2 --> Act
-    Reflect -->|finish| Finalize[Finalize answer + metrics]
+    Reflect -->|replan| Replan[Replan remaining work]
+    Replan --> Act
+    Reflect -->|finish| Evaluate[Evaluate\nFinal-answer scorer]
+    Evaluate -->|pass| Finalize[Finalize answer + metrics]
+    Evaluate -->|fail once| Replan
+    Evaluate -->|fail after replan| Finalize
     Finalize --> End[API Response]
 ```
 
@@ -59,8 +62,9 @@ flowchart TD
 backend/
   app/
     main.py            # FastAPI endpoints
-    graph_service.py   # LangGraph plan-act-reflect runtime
+    graph_service.py   # LangGraph plan-act-reflect-evaluate runtime
     environment.py     # Observation-Action environment interface
+    evaluator_service.py # Final-answer scoring + pass/fail
     memory_service.py  # Working + experience memory
     chat_service.py    # Direct chat
     rag_service.py     # RAG + FAISS retrieval
@@ -104,6 +108,7 @@ EXPERIENCE_MEMORY_MAX_ITEMS=200
 EXPERIENCE_MEMORY_TOP_K=3
 EXPERIENCE_MEMORY_MIN_SCORE=0.2
 EXPERIENCE_MEMORY_ENABLED=true
+EVALUATION_PASS_SCORE=0.6
 ```
 
 API key: https://aistudio.google.com/app/apikey
@@ -147,6 +152,7 @@ It prints for each case:
 - plan / subgoals
 - step routes and rewards
 - reflection (`judge_source`, `goal_achieved`, lesson)
+- evaluation (`score`, `passed`, `feedback`, `triggered_replan`)
 - metrics (`steps_used`, `tool_calls`, `memory_hits`, rewards)
 - environment action space
 
@@ -178,6 +184,7 @@ Useful headers:
 - `plan`: goal + subgoals
 - `steps`: per-step route/action/reward/tools
 - `reflection`: LLM judge result (`continue/replan/finish`, lesson, `goal_achieved`)
+- `evaluation`: final-answer score/pass, feedback, and whether replan was triggered
 - `metrics`: steps, tool calls, replan flag, memory hits, rewards
 - `memory_lessons`: retrieved experience lessons
 - `environment`: `{ name, action_space }`
@@ -187,7 +194,7 @@ Useful headers:
 ## Core Capabilities
 
 ### Hierarchical planning
-- Runtime: `plan -> act -> execute -> reflect (-> replan) -> finalize`
+- Runtime: `plan -> act -> execute -> reflect -> evaluate (-> replan) -> finalize`
 - Simple intents stay single-step; complex intents expand to multiple subgoals
 - Cap with `MAX_PLAN_STEPS`
 
@@ -200,6 +207,11 @@ Useful headers:
 - LLM-as-judge for progress and next action
 - Hard guards + rule fallback for reliability
 - Actionable lessons written into experience memory
+
+### Final-answer evaluation
+- Dedicated evaluator scores the composed answer (`EVALUATION_PASS_SCORE`)
+- Fail once triggers replan (`evaluation.triggered_replan=true`, `metrics.replanned=true`)
+- Second failure finalizes with score/feedback instead of infinite loops
 
 ### Memory
 - Working memory by `session_id`
