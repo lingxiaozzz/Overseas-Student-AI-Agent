@@ -16,18 +16,27 @@ DEMO_CASES = [
         "title": "1) RAG: USYD pre-arrival checklist",
         "message": "I am a new international student at USYD. What should I prepare before arrival?",
         "expect": "Should route to rag and retrieve pre-arrival guidance.",
+        "required_route": "rag",
+        "required_tools": [],
+        "min_steps": 1,
     },
     {
         "id": "demo-tool",
         "title": "2) Tool: weekly budget estimation",
         "message": "Can you estimate my weekly budget if rent is 420 AUD?",
         "expect": "Should call estimate_weekly_budget tool.",
+        "required_route": "tool",
+        "required_tools": ["estimate_weekly_budget"],
+        "min_steps": 1,
     },
     {
         "id": "demo-multi",
         "title": "3) Multi-step: arrival prep + budget",
         "message": "Help me prepare for USYD arrival and estimate weekly budget if rent is 420 AUD.",
         "expect": "Should decompose into multiple steps across rag/tool.",
+        "required_routes_any": ["rag", "tool"],
+        "required_tools": ["estimate_weekly_budget"],
+        "min_steps": 2,
     },
 ]
 
@@ -56,7 +65,38 @@ def _preview(text: str, width: int = 220) -> str:
     return textwrap.shorten(cleaned, width=width, placeholder="...")
 
 
-def print_case_result(case: dict[str, Any], response: dict[str, Any], trace_id: str) -> None:
+def evaluate_case(case: dict[str, Any], response: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    used_tools = set(response.get("used_tools") or [])
+    steps = response.get("steps") or []
+    step_routes = {step.get("route") for step in steps}
+    metrics = response.get("metrics") or {}
+    steps_used = int(metrics.get("steps_used", len(steps) or 0))
+
+    if case.get("required_route") and response.get("route") != case["required_route"]:
+        failures.append(f"route={response.get('route')} expected={case['required_route']}")
+
+    required_any = set(case.get("required_routes_any") or [])
+    if required_any and not required_any.intersection(step_routes or {response.get("route")}):
+        failures.append(f"missing routes any of {sorted(required_any)}")
+
+    required_tools = set(case.get("required_tools") or [])
+    if not required_tools.issubset(used_tools):
+        failures.append(f"tools={sorted(used_tools)} expected to include {sorted(required_tools)}")
+
+    min_steps = int(case.get("min_steps", 1))
+    if steps_used < min_steps:
+        failures.append(f"steps_used={steps_used} expected>={min_steps}")
+
+    return failures
+
+
+def print_case_result(
+    case: dict[str, Any],
+    response: dict[str, Any],
+    trace_id: str,
+    failures: list[str],
+) -> None:
     plan = response.get("plan") or {}
     reflection = response.get("reflection") or {}
     metrics = response.get("metrics") or {}
@@ -66,6 +106,7 @@ def print_case_result(case: dict[str, Any], response: dict[str, Any], trace_id: 
     print("=" * 72)
     print(case["title"])
     print(f"Expect: {case['expect']}")
+    print(f"Result: {'PASS' if not failures else 'FAIL'} {('; '.join(failures) if failures else '')}")
     print(f"trace_id: {trace_id}")
     print(f"route: {response.get('route')} | reason: {response.get('router_reason')}")
     print(f"plan.goal: {plan.get('goal')}")
@@ -124,6 +165,7 @@ def main() -> None:
     print(f"session_id: {args.session_id}")
     print()
 
+    failed_cases = 0
     for case in DEMO_CASES:
         trace_id = f"demo-{case['id']}"
         headers = {
@@ -137,10 +179,16 @@ def main() -> None:
         }
         print(f"Running {case['id']} ...")
         response = post_json(endpoint, payload, headers)
-        print_case_result(case, response, trace_id)
+        failures = evaluate_case(case, response)
+        if failures:
+            failed_cases += 1
+        print_case_result(case, response, trace_id, failures)
 
     print("Demo complete.")
+    print(f"Summary: {len(DEMO_CASES) - failed_cases}/{len(DEMO_CASES)} passed")
     print("Tip: set LOG_LEVEL=TRACE on the server to show plan/act/reflect traces.")
+    if failed_cases:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
