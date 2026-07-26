@@ -1,11 +1,10 @@
-from typing import Any
-
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from app.chat_service import MissingApiKeyError
 from app.config import settings
+from app.content_utils import content_to_text
 from app.retry_service import with_retry
 
 
@@ -79,12 +78,6 @@ def _create_tool_model() -> ChatGoogleGenerativeAI:
     )
 
 
-def _to_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    return str(content)
-
-
 async def generate_tool_response(message: str, chat_history: str = "") -> tuple[str, list[str]]:
     model = _create_tool_model().bind_tools(TOOLS)
     messages = [
@@ -95,7 +88,7 @@ async def generate_tool_response(message: str, chat_history: str = "") -> tuple[
     tool_calls = first_response.tool_calls or []
 
     if not tool_calls:
-        return _to_text(first_response.content), []
+        return content_to_text(first_response.content), []
 
     used_tools: list[str] = []
     tool_messages: list[ToolMessage] = []
@@ -110,11 +103,11 @@ async def generate_tool_response(message: str, chat_history: str = "") -> tuple[
         used_tools.append(tool_name)
         tool_messages.append(
             ToolMessage(
-                content=_to_text(tool_result),
+                content=content_to_text(tool_result),
                 tool_call_id=tool_call["id"],
                 name=tool_name,
             )
         )
 
     final_response = await with_retry(lambda: model.ainvoke([*messages, first_response, *tool_messages]))
-    return _to_text(final_response.content), used_tools
+    return content_to_text(final_response.content), used_tools

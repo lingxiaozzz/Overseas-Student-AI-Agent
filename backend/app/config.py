@@ -25,6 +25,7 @@ class Settings:
     retry_initial_seconds: float = float(os.getenv("RETRY_INITIAL_SECONDS", "1.0"))
     retry_max_seconds: float = float(os.getenv("RETRY_MAX_SECONDS", "8.0"))
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
+    max_plan_steps: int = int(os.getenv("MAX_PLAN_STEPS", "4"))
     knowledge_base_path: Path = PROJECT_ROOT / "data" / "knowledge_base"
 
 

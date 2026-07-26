@@ -2,6 +2,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from app.config import settings
+from app.content_utils import content_to_text
 from app.retry_service import with_retry
 
 
@@ -33,8 +34,4 @@ async def generate_chat_response(message: str, chat_history: str = "") -> str:
     )
     chain = prompt | model
     response = await with_retry(lambda: chain.ainvoke({"message": message, "chat_history": chat_history}))
-
-    if isinstance(response.content, str):
-        return response.content
-
-    return str(response.content)
+    return content_to_text(response.content)

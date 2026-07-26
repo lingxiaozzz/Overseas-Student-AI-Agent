@@ -2,6 +2,10 @@ from pydantic import BaseModel, Field
 from typing import Literal
 
 
+Route = Literal["chat", "rag", "tool"]
+ReflectAction = Literal["continue", "replan", "finish"]
+
+
 class ChatRequest(BaseModel):
     message: str = Field(
         ...,
@@ -36,7 +40,38 @@ class ToolChatResponse(ChatResponse):
     used_tools: list[str]
 
 
+class AgentPlan(BaseModel):
+    goal: str
+    subgoals: list[str]
+
+
+class PlanStepResult(BaseModel):
+    step_index: int
+    subgoal: str
+    route: Route
+    router_reason: str
+    answer_preview: str
+    used_tools: list[str]
+
+
+class ReflectionInfo(BaseModel):
+    done: bool
+    next_action: ReflectAction
+    progress: float
+    lesson: str
+
+
+class AgentMetrics(BaseModel):
+    steps_used: int
+    tool_calls: int
+    replanned: bool
+
+
 class AgentChatResponse(RagChatResponse):
-    route: Literal["chat", "rag", "tool"]
+    route: Route
     router_reason: str
     used_tools: list[str]
+    plan: AgentPlan
+    steps: list[PlanStepResult]
+    reflection: ReflectionInfo
+    metrics: AgentMetrics

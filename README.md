@@ -56,6 +56,7 @@ RETRY_MAX_ATTEMPTS=3
 RETRY_INITIAL_SECONDS=1.0
 RETRY_MAX_SECONDS=8.0
 LOG_LEVEL=INFO
+MAX_PLAN_STEPS=4
 ```
 
 You can create a Gemini API key from Google AI Studio:
@@ -113,12 +114,22 @@ Try the `POST /agent-chat` endpoint with:
 
 The agent response includes:
 
-- `route`: `chat`, `rag`, or `tool`, selected by LangGraph route node.
-- `router_reason`: short explanation from router about why that route was selected.
-- `answer`: final answer from the selected route.
-- `sources`: retrieved files (empty for direct chat).
-- `retrieved_contexts`: retrieved ranked snippets (empty for direct chat).
-- `used_tools`: tool names used during tool-calling flow (empty for non-tool routes).
+- `route`: last-step route (`chat`, `rag`, or `tool`) from hierarchical execution.
+- `router_reason`: short explanation from the last act/route decision.
+- `answer`: final synthesized answer across completed plan steps.
+- `plan`: overall `goal` and ordered `subgoals` from the planner.
+- `steps`: per-step route, reason, tools, and answer preview.
+- `reflection`: progress, next action (`continue`/`replan`/`finish`), and lesson.
+- `metrics`: `steps_used`, `tool_calls`, and whether replanning happened.
+- `sources`: retrieved files aggregated across steps (empty for direct chat).
+- `retrieved_contexts`: retrieved ranked snippets aggregated across steps.
+- `used_tools`: tool names used during tool-calling steps.
+
+Hierarchical planning behavior:
+
+- `/agent-chat` runs `plan -> act -> execute -> reflect (-> replan) -> finalize`.
+- Simple requests usually stay single-step; complex goals can expand to multiple subgoals.
+- `MAX_PLAN_STEPS` caps the planning horizon (default `4`).
 
 Try the `POST /tool-chat` endpoint with:
 
