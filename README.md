@@ -259,12 +259,18 @@ Reports are written to:
 - `eval/reports/route-eval-<timestamp>.json` and `eval/reports/latest.json`
 - `eval/reports/task-eval-<timestamp>.json` and `eval/reports/task-latest.json`
 
-### Baseline vs optimized (same 12 route cases / 7 task cases)
+### Evaluation reports
 
-| Report | Baseline | Optimized (current) |
-|---|---|---|
-| Route eval | `route-eval-20260728-084259Z.json` | `route-eval-20260728-102435Z.json` |
-| Task eval | `task-eval-20260728-085613Z.json` | `task-eval-20260728-102333Z.json` |
+| Phase | Route cases / turns | Task cases | Route report | Task report |
+|---|---:|---:|---|---|
+| Baseline | 12 / 14 | 7 | `route-eval-20260728-084259Z.json` | `task-eval-20260728-085613Z.json` |
+| Optimized (small suite) | 12 / 14 | 7 | `route-eval-20260728-102435Z.json` | `task-eval-20260728-102333Z.json` |
+| **Expanded suite (latest)** | **38 / 45** | **23** | `route-eval-20260728-122242Z.json` | `task-eval-20260728-105801Z.json` |
+
+> The small suite measures the impact of routing/runtime optimizations on the original cases.  
+> The expanded suite adds broader coverage (more RAG/tool/chat, multi-turn, ambiguous, safety, and edge scenarios) and is the current benchmark.
+
+### Phase 1: Baseline → optimized (same 12 route / 7 task cases)
 
 #### Route metrics
 
@@ -288,11 +294,6 @@ Route category strict accuracy:
 | adversarial | 0.00% | **100.00%** |
 | edge-case | 75.00% | **100.00%** |
 
-Route strict mismatches:
-
-- Baseline (6): `multi-rag-1` (turn_1), `multi-tool-1` (turn_1, turn_2), `ambiguous-2`, `adv-1`, `edge-3`
-- Optimized (1): `ambiguous-2` (checklist request routed to `rag` instead of `tool`; lenient match still passes)
-
 #### Task metrics
 
 | Metric | Baseline | Optimized | Delta |
@@ -314,15 +315,87 @@ Task category success rate:
 | safety | 0.00% | **100.00%** |
 | ambiguous | 0.00% | **100.00%** |
 
-Task outcomes:
+Small-suite remaining gaps: `ambiguous-2` strict route (`checklist` vs `rag`); `task-chat-support` (`max_steps`).
 
-- Baseline successes (2/7): `task-tool-budget`, `task-multi-arrival-budget`
-- Optimized successes (6/7): all above plus `task-rag-prearrival`, `task-context-only`, `task-safety-visa`, `task-ambiguous-plan`
-- Remaining failure: `task-chat-support` (`max_steps` — emotional-support chat used 2 steps instead of the expected 1)
+### Phase 2: Optimized small suite → expanded suite (latest benchmark)
 
-### Optimization summary
+#### Route metrics
 
-Main code changes behind the improvement:
+| Metric | Small suite (12/14) | Expanded suite (38/45) | Delta |
+|---|---:|---:|---:|
+| Per-turn strict accuracy | 92.86% | **73.33%** | -19.53pp |
+| Per-turn lenient accuracy | 100.00% | **77.78%** | -22.22pp |
+| Per-turn weighted score | 0.907 | **0.724** | -0.183 |
+| Final-route strict accuracy | 100.00% | **42.86%** | -57.14pp |
+| Context-sensitivity rate | 100.00% | **66.67%** | -33.33pp |
+| Safety correctness | 100.00% | **100.00%** | 0.00pp |
+| Ambiguity precision | 50.00% | **40.00%** | -10.00pp |
+| Request errors / timeouts | 0 | **1** (`ambiguous-5`) | +1 |
+
+Route category strict accuracy (expanded suite):
+
+| Category | Cases | Strict accuracy |
+|---|---:|---:|
+| adversarial | 4 | **100.00%** |
+| edge-case | 10 | **90.00%** |
+| single-turn | 12 | **83.33%** |
+| multi-turn | 14 | **57.14%** |
+| ambiguous-intent | 5 | **40.00%** |
+
+#### Task metrics
+
+| Metric | Small suite (7) | Expanded suite (23) | Delta |
+|---|---:|---:|---:|
+| Task success rate | 85.71% | **73.91%** | -11.80pp |
+| Avg steps | 1.43 | **1.57** | +0.14 |
+| Avg tool calls | 0.43 | **0.26** | -0.17 |
+| Replan rate | 28.57% | **30.43%** | +1.86pp |
+| Reflection finish rate | 100.00% | **100.00%** | 0.00pp |
+| Memory hit rate | 57.14% | **52.17%** | -4.97pp |
+
+Task category success rate (expanded suite):
+
+| Category | Cases | Success rate |
+|---|---:|---:|
+| safety | 3 | **100.00%** |
+| ambiguous | 2 | **100.00%** |
+| edge | 2 | **100.00%** |
+| multi-intent | 3 | **66.67%** |
+| context-sensitivity | 3 | **66.67%** |
+| single-intent | 10 | **60.00%** |
+
+Expanded-suite failures (6/23):
+
+| Case | Failure reason |
+|---|---|
+| `task-chat-support` | `max_steps` (2 steps for emotional support) |
+| `task-tool-checklist` | `final_route`, `tools` (checklist routed to rag, no tool call) |
+| `task-chat-loneliness` | `max_steps`, `final_route` (over-planned, ended in rag) |
+| `task-chat-greeting` | `max_steps`, `final_route` (5 steps, over-planned) |
+| `task-multi-checklist-arrival` | `tools` (rag only, no checklist tool) |
+| `task-context-background` | `max_steps`, `final_route` (background intro expanded to rag) |
+
+### Summary
+
+**What the optimization achieved (Phase 1):**  
+Routing guards, primary-route finalize, single-step chat planning, and early reflect finish raised the original small suite from **28.6% → 85.7%** task success and **57.1% → 92.9%** route strict accuracy. Multi-turn context-setting, adversarial safety, and final-route reporting improved the most.
+
+**What the expanded suite revealed (Phase 2):**  
+After growing to **38 route / 23 task cases**, metrics dropped to **73.3%** route strict and **73.9%** task success — not because the optimizations regressed, but because harder scenarios exposed remaining weaknesses:
+
+- **Checklist → rag instead of tool** — `ambiguous-2`, `single-tool-2`, `multi-tool-2`, `edge-8`, and related task cases
+- **Pure chat over-planning** — greetings, emotional support, and loneliness cases expand into multi-step plans and sometimes end in rag
+- **Multi-turn context drift** — first-turn background statements still trigger rag in some sessions
+- **Mixed-intent latency** — `ambiguous-5` (orientation + budget) timed out at 180s during full `/agent-chat` evaluation
+
+**Stable strengths across both phases:**
+
+- Adversarial / safety routing: **100%** on expanded route and task suites
+- RAG policy queries: pre-arrival, OSHC, accommodation, orientation
+- Budget tool calls for explicit calculation requests
+- Reflection finish rate: **100%** throughout
+
+### Code changes behind Phase 1 improvements
 
 1. **Primary route in finalize** — API `route` reflects the dominant execution mode (tool/rag), not the last summary `chat` step.
 2. **Hard routing guards in Act** — context-only inputs stay `chat`; safety-sensitive inputs stay `rag`; explicit budget requests stay `tool`.
@@ -330,18 +403,15 @@ Main code changes behind the improvement:
 4. **Early finish in Reflect** — stop after a conclusive rag/tool/chat step when the goal is already met.
 5. **Replan observability** — preserve `step_results`, `steps_used`, and `tool_calls` across replans.
 
-What improved most:
+### Next improvements (priority)
 
-- Multi-turn context-setting (`context-only` → `chat`) and final-route reporting
-- Adversarial safety routing (`adv-1` → `rag`)
-- Task-level route correctness for rag / context / safety / ambiguous cases
-- Execution efficiency (lower avg steps and replan rate)
-
-Remaining gaps:
-
-- `ambiguous-2` strict route (`checklist` vs `rag`) — acceptable under lenient scoring but still a strict mismatch
-- `task-chat-support` step budget — simple chat sometimes takes an extra step before `finish`
-- Eval set is still small (12 route / 7 task cases); expanded suites and updated knowledge base are prepared but not yet re-benchmarked
+| Priority | Area | Action |
+|---|---|---|
+| **P0** | Checklist routing | Add `_requires_checklist_tool()` guard (mirror budget tool logic) to force `build_prearrival_checklist` when checklist is explicitly requested |
+| **P1** | Pure chat efficiency | Tighten early-finish for emotional support / greeting / loneliness; cap subgoals to 1 for keyword-chat inputs |
+| **P1** | Context-only multi-turn | Strengthen first-turn hard guard so background intros (`I am…`, `I will study…`) never trigger rag |
+| **P2** | Mixed-intent latency | Split heavy orientation+budget cases into task-only eval; or add a lightweight route-only endpoint for route benchmarks |
+| **P2** | Knowledge + eval hygiene | Keep orientation/visa KB articles updated; use `--continue-on-error` (default) for long route eval runs |
 
 ## Interview Talking Points
 
