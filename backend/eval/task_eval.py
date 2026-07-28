@@ -281,7 +281,7 @@ def post_json(url: str, payload: dict, headers: dict[str, str] | None = None) ->
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=180) as response:
+        with urllib.request.urlopen(request, timeout=300) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         raise RuntimeError(f"HTTP {exc.code}: {exc.read().decode('utf-8')}") from exc

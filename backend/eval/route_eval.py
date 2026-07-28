@@ -8,6 +8,7 @@ from pathlib import Path
 
 ROUTE_ORDER = ["chat", "rag", "tool", "unknown"]
 LENIENT_AMBIGUOUS_THRESHOLD = 0.3
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 300
 
 TEST_CASES = [
     {"id": "single-rag-1", "category": "single-turn", "difficulty": "easy", "intent_label": "pre_arrival_info", "message": "I am a new USYD student. What should I prepare before arrival?", "expected_route": "rag", "expected_reason": "pre-arrival information requires university policy retrieval"},
@@ -221,7 +222,13 @@ TEST_CASES = [
 ]
 
 
-def post_json(url: str, payload: dict, headers: dict[str, str] | None = None) -> dict:
+def post_json(
+    url: str,
+    payload: dict,
+    headers: dict[str, str] | None = None,
+    timeout_seconds: int = DEFAULT_REQUEST_TIMEOUT_SECONDS,
+    request_label: str = "",
+) -> dict:
     request_headers = {"Content-Type": "application/json"}
     if headers:
         request_headers.update(headers)
@@ -231,11 +238,18 @@ def post_json(url: str, payload: dict, headers: dict[str, str] | None = None) ->
         headers=request_headers,
         method="POST",
     )
+    label = f" ({request_label})" if request_label else ""
     try:
-        with urllib.request.urlopen(request, timeout=120) as response:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             return json.loads(response.read().decode("utf-8"))
+    except TimeoutError as exc:
+        raise TimeoutError(
+            f"Request timed out after {timeout_seconds}s{label}. "
+            "The agent may be waiting on slow Gemini responses or retries; "
+            "check backend logs and retry with a higher --timeout if needed."
+        ) from exc
     except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"HTTP {exc.code}: {exc.read().decode('utf-8')}") from exc
+        raise RuntimeError(f"HTTP {exc.code}{label}: {exc.read().decode('utf-8')}") from exc
 
 
 def best_expected_route(case: dict) -> str:
@@ -276,11 +290,14 @@ def eval_turn(
     lenient_mismatches: list[dict],
     tool_mismatches: list[dict],
     custom_metrics: dict[str, dict[str, float]],
+    timeout_seconds: int = DEFAULT_REQUEST_TIMEOUT_SECONDS,
 ) -> tuple[str, list[str]]:
     response = post_json(
         endpoint,
         {"message": turn_case["message"], "session_id": session_id},
         headers={"x-persist-experience": "false"},
+        timeout_seconds=timeout_seconds,
+        request_label=f"{case_id} turn {turn_index}",
     )
     predicted = response.get("route", "unknown")
     used_tools = response.get("used_tools", [])
@@ -369,9 +386,17 @@ def main() -> None:
     parser.add_argument("--session-prefix", default="route-eval", help="Session prefix.")
     parser.add_argument("--output-dir", default="eval/reports", help="Directory for JSON reports.")
     parser.add_argument("--output-prefix", default="route-eval", help="Report filename prefix.")
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=DEFAULT_REQUEST_TIMEOUT_SECONDS,
+        help="Per-request timeout in seconds for /agent-chat (default: 300).",
+    )
     args = parser.parse_args()
 
     endpoint = f"{args.base_url.rstrip('/')}/agent-chat"
+    planned_turns = sum(len(case.get("turns", [case])) for case in TEST_CASES)
+    print(f"Running route eval: {len(TEST_CASES)} cases, {planned_turns} turns, timeout={args.timeout}s")
     confusion: dict[str, Counter] = defaultdict(Counter)
     category_stats: dict[str, dict[str, float]] = defaultdict(
         lambda: {"total": 0.0, "strict_correct": 0.0, "lenient_correct": 0.0, "weighted_score_sum": 0.0}
@@ -406,6 +431,7 @@ def main() -> None:
             predicted_state: dict[str, str] = {}
             for turn_index, turn in enumerate(case["turns"], start=1):
                 total_turns += 1
+                print(f"[{total_turns}/{planned_turns}] {case_id} turn {turn_index}...")
                 predicted, used_tools = eval_turn(
                     endpoint=endpoint,
                     session_id=session_id,
@@ -419,6 +445,7 @@ def main() -> None:
                     lenient_mismatches=lenient_mismatches,
                     tool_mismatches=tool_mismatches,
                     custom_metrics=custom_metrics,
+                    timeout_seconds=args.timeout,
                 )
                 expected_state[f"turn_{turn_index}"] = best_expected_route(turn)
                 predicted_state[f"turn_{turn_index}"] = predicted
@@ -464,6 +491,7 @@ def main() -> None:
             continue
 
         total_turns += 1
+        print(f"[{total_turns}/{planned_turns}] {case_id}...")
         predicted, _ = eval_turn(
             endpoint=endpoint,
             session_id=session_id,
@@ -477,6 +505,7 @@ def main() -> None:
             lenient_mismatches=lenient_mismatches,
             tool_mismatches=tool_mismatches,
             custom_metrics=custom_metrics,
+            timeout_seconds=args.timeout,
         )
         strict_correct += 1 if predicted == best_expected_route(case) else 0
         lenient_correct += 1 if lenient_match(predicted, case) else 0
