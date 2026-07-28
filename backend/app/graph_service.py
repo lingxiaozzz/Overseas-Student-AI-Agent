@@ -174,6 +174,7 @@ class StepRecord(TypedDict, total=False):
     action_type: str
     observation_step_index: int
     action_source: str
+    replan_round: int
 
 
 class AgentState(TypedDict, total=False):
@@ -224,6 +225,7 @@ class AgentState(TypedDict, total=False):
     evaluation_source: str
     evaluation_triggered_replan: bool
     evaluation_next_action: Literal["finalize", "replan"]
+    replan_round: int
 
 
 SAFETY_HINT_KEYWORDS = {
@@ -581,6 +583,7 @@ async def _llm_next_action(
     chat_history: str,
     observation: Observation,
     hints: list[str],
+    hint_index: int,
     step_results: list[StepRecord],
     experience_context: str,
 ) -> NextActionDecision:
@@ -592,7 +595,7 @@ async def _llm_next_action(
         f"-> {_preview(str(item.get('answer', '')), 160)}"
         for item in step_results
     ) or "- none"
-    unused_hints = hints[len(step_results) :]
+    unused_hints = hints[hint_index:]
     prompt = ChatPromptTemplate.from_messages(
         [
             ("system", ACTOR_PROMPT),
@@ -689,13 +692,19 @@ async def _act_node(state: AgentState) -> AgentState:
 
     source = "llm"
     try:
+        user_message = state.get("message", goal)
+        actor_experience_context = state.get("experience_context", "No prior experience lessons.")
+        if _is_context_only_message(user_message) or _should_force_rag_for_safety(user_message):
+            actor_experience_context = "No prior experience lessons."
+
         decision = await _llm_next_action(
             goal=goal,
             chat_history=chat_history,
             observation=observation,
             hints=hints,
+            hint_index=current_step,
             step_results=step_results,
-            experience_context=state.get("experience_context", "No prior experience lessons."),
+            experience_context=actor_experience_context,
         )
         content = (decision.content or "").strip() or (
             hints[current_step] if current_step < len(hints) else goal
@@ -783,9 +792,10 @@ async def _execute_node(state: AgentState) -> AgentState:
                 state.get("last_observation", {}).get("step_index", current_step)
             ),
             "action_source": str(state.get("action_decision_source", "rule_fallback")),
+            "replan_round": int(state.get("replan_round", 0)),
         }
     )
-    steps_used = current_step + 1
+    steps_used = int(state.get("steps_used", 0)) + 1
     tool_calls = state.get("tool_calls", 0) + len(used_tools)
     total_reward = float(state.get("total_reward", 0.0)) + reward
     logger.trace(
@@ -820,6 +830,7 @@ def _rule_reflect(state: AgentState) -> ReflectionDecision:
     progress = min(current_step / planned_total, 1.0)
     last_answer = step_results[-1]["answer"] if step_results else ""
     budget_left = _step_budget_remaining(state)
+    total_steps_used = int(state.get("steps_used", current_step))
 
     if current_step >= max_steps:
         return ReflectionDecision(
@@ -838,7 +849,7 @@ def _rule_reflect(state: AgentState) -> ReflectionDecision:
                 ],
                 success=bool(last_answer.strip()),
                 replanned=bool(replanned),
-                steps_used=current_step,
+                steps_used=total_steps_used,
             ),
         )
     if not last_answer.strip() and not replanned:
@@ -875,7 +886,7 @@ def _rule_reflect(state: AgentState) -> ReflectionDecision:
             ],
             success=bool(last_answer.strip()),
             replanned=bool(replanned),
-            steps_used=current_step,
+            steps_used=total_steps_used,
         ),
     )
 
@@ -1026,8 +1037,10 @@ async def _replan_node(state: AgentState) -> AgentState:
         logger.warning(f"trace_id={trace_id} replan_fallback=single_step")
 
     completed = state.get("current_step", 0)
+    next_replan_round = int(state.get("replan_round", 0)) + 1
     logger.trace(
-        f"trace_id={trace_id} replan_new_hints={len(new_subgoals)} completed={completed}"
+        f"trace_id={trace_id} replan_new_hints={len(new_subgoals)} completed={completed} "
+        f"replan_round={next_replan_round}"
     )
     return {
         "goal": goal,
@@ -1035,12 +1048,10 @@ async def _replan_node(state: AgentState) -> AgentState:
         "subgoal_hints": new_subgoals,
         "current_step": 0,
         "replanned": True,
+        "replan_round": next_replan_round,
         "reflect_next_action": "continue",
         "reflect_done": False,
         "reflect_lesson": "Replanned soft hints after a stalled Observation→Action step.",
-        "step_results": [],
-        "steps_used": 0,
-        "tool_calls": 0,
         "pending_action_content": "",
         "action_decision_source": "hint_fallback",
     }
@@ -1385,6 +1396,7 @@ async def run_agent_workflow(
             "evaluation_source": "rule_fallback",
             "evaluation_triggered_replan": False,
             "evaluation_next_action": "finalize",
+            "replan_round": 0,
         }
     )
     return result
