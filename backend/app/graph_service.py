@@ -702,6 +702,11 @@ async def _act_node(state: AgentState) -> AgentState:
         )
         original_action_type = decision.action_type
         forced_action_type = _keyword_route(content)
+        # If the step-specific hint becomes too generic (and falls back to `chat`),
+        # recover the intended routing from the original user message.
+        overall_action_type = _keyword_route(state.get("message", goal))
+        if forced_action_type == "chat" and overall_action_type != "chat":
+            forced_action_type = overall_action_type
         # Hard-guard action type to match router semantics.
         # This prevents experience/memory from drifting context-only/safety requests into tool/rag.
         if forced_action_type != original_action_type:
