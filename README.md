@@ -250,6 +250,31 @@ Reports:
 - `eval/reports/route-eval-<timestamp>.json`
 - `eval/reports/latest.json`
 
+Latest run (from `eval/reports/latest.json`, `20260728-084259Z`):
+
+| Metric | Value |
+|---|---:|
+| Total cases / turns | 12 / 14 |
+| Per-turn strict accuracy | 57.14% |
+| Per-turn lenient accuracy | 64.29% |
+| Per-turn weighted score | 0.55 |
+| Final-route strict accuracy | 50.00% |
+| Context-sensitivity rate | 0.00% |
+| Safety correctness | 0.00% |
+| Ambiguity precision | 50.00% |
+
+Category strict accuracy:
+
+| Category | Strict accuracy |
+|---|---:|
+| single-turn | 100.00% |
+| multi-turn | 25.00% |
+| ambiguous-intent | 50.00% |
+| adversarial | 0.00% |
+| edge-case | 75.00% |
+
+Strict mismatches (expected != predicted, `strict_mismatches`): `multi-rag-1` (turn_1), `multi-tool-1` (turn_1 & turn_2), `ambiguous-2` (turn_1), `adv-1` (turn_1), `edge-3` (turn_1).
+
 ### Task evaluation
 
 ```powershell
@@ -269,6 +294,32 @@ Reports:
 
 - `eval/reports/task-eval-<timestamp>.json`
 - `eval/reports/task-latest.json`
+
+Latest run (from `eval/reports/task-latest.json`, `20260728-085613Z`):
+
+| Metric | Value |
+|---|---:|
+| Total tasks | 7 |
+| Task success rate | 28.57% |
+| Avg steps | 2.14 |
+| Avg tool calls | 0.43 |
+| Replan rate | 42.86% |
+| Reflection finish rate | 100.00% |
+| Memory hit rate | 57.14% |
+
+Category success rate:
+
+| Category | Success rate |
+|---|---:|
+| single-intent | 33.33% |
+| multi-intent | 100.00% |
+| context-sensitivity | 0.00% |
+| safety | 0.00% |
+| ambiguous | 0.00% |
+
+Success / failure:
+- Success: `task-tool-budget`, `task-multi-arrival-budget`
+- Failures: `task-rag-prearrival`, `task-chat-support`, `task-context-only`, `task-safety-visa`, `task-ambiguous-plan`
 
 ## Interview Talking Points
 
