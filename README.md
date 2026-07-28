@@ -238,88 +238,110 @@ Useful headers:
 
 ## Evaluation
 
-### Route evaluation
+### Run commands
+
+Route evaluation:
 
 ```powershell
 cd backend
 python eval/route_eval.py --base-url http://127.0.0.1:8000
 ```
 
-Reports:
-
-- `eval/reports/route-eval-<timestamp>.json`
-- `eval/reports/latest.json`
-
-Latest run (from `eval/reports/latest.json`, `20260728-084259Z`):
-
-| Metric | Value |
-|---|---:|
-| Total cases / turns | 12 / 14 |
-| Per-turn strict accuracy | 57.14% |
-| Per-turn lenient accuracy | 64.29% |
-| Per-turn weighted score | 0.55 |
-| Final-route strict accuracy | 50.00% |
-| Context-sensitivity rate | 0.00% |
-| Safety correctness | 0.00% |
-| Ambiguity precision | 50.00% |
-
-Category strict accuracy:
-
-| Category | Strict accuracy |
-|---|---:|
-| single-turn | 100.00% |
-| multi-turn | 25.00% |
-| ambiguous-intent | 50.00% |
-| adversarial | 0.00% |
-| edge-case | 75.00% |
-
-Strict mismatches (expected != predicted, `strict_mismatches`): `multi-rag-1` (turn_1), `multi-tool-1` (turn_1 & turn_2), `ambiguous-2` (turn_1), `adv-1` (turn_1), `edge-3` (turn_1).
-
-### Task evaluation
+Task evaluation:
 
 ```powershell
 cd backend
 python eval/task_eval.py --base-url http://127.0.0.1:8000
 ```
 
-Metrics:
+Reports are written to:
 
-- task success rate
-- avg steps / tool calls
-- replan rate
-- reflection finish rate
-- memory hit rate
+- `eval/reports/route-eval-<timestamp>.json` and `eval/reports/latest.json`
+- `eval/reports/task-eval-<timestamp>.json` and `eval/reports/task-latest.json`
 
-Reports:
+### Baseline vs optimized (same 12 route cases / 7 task cases)
 
-- `eval/reports/task-eval-<timestamp>.json`
-- `eval/reports/task-latest.json`
+| Report | Baseline | Optimized (current) |
+|---|---|---|
+| Route eval | `route-eval-20260728-084259Z.json` | `route-eval-20260728-102435Z.json` |
+| Task eval | `task-eval-20260728-085613Z.json` | `task-eval-20260728-102333Z.json` |
 
-Latest run (from `eval/reports/task-latest.json`, `20260728-085613Z`):
+#### Route metrics
 
-| Metric | Value |
-|---|---:|
-| Total tasks | 7 |
-| Task success rate | 28.57% |
-| Avg steps | 2.14 |
-| Avg tool calls | 0.43 |
-| Replan rate | 42.86% |
-| Reflection finish rate | 100.00% |
-| Memory hit rate | 57.14% |
+| Metric | Baseline | Optimized | Delta |
+|---|---:|---:|---:|
+| Per-turn strict accuracy | 57.14% | **92.86%** | +35.72pp |
+| Per-turn lenient accuracy | 64.29% | **100.00%** | +35.71pp |
+| Per-turn weighted score | 0.550 | **0.907** | +0.357 |
+| Final-route strict accuracy | 50.00% | **100.00%** | +50.00pp |
+| Context-sensitivity rate | 0.00% | **100.00%** | +100.00pp |
+| Safety correctness | 0.00% | **100.00%** | +100.00pp |
+| Ambiguity precision | 50.00% | 50.00% | 0.00pp |
 
-Category success rate:
+Route category strict accuracy:
 
-| Category | Success rate |
-|---|---:|
-| single-intent | 33.33% |
-| multi-intent | 100.00% |
-| context-sensitivity | 0.00% |
-| safety | 0.00% |
-| ambiguous | 0.00% |
+| Category | Baseline | Optimized |
+|---|---:|---:|
+| single-turn | 100.00% | 100.00% |
+| multi-turn | 25.00% | **100.00%** |
+| ambiguous-intent | 50.00% | 50.00% |
+| adversarial | 0.00% | **100.00%** |
+| edge-case | 75.00% | **100.00%** |
 
-Success / failure:
-- Success: `task-tool-budget`, `task-multi-arrival-budget`
-- Failures: `task-rag-prearrival`, `task-chat-support`, `task-context-only`, `task-safety-visa`, `task-ambiguous-plan`
+Route strict mismatches:
+
+- Baseline (6): `multi-rag-1` (turn_1), `multi-tool-1` (turn_1, turn_2), `ambiguous-2`, `adv-1`, `edge-3`
+- Optimized (1): `ambiguous-2` (checklist request routed to `rag` instead of `tool`; lenient match still passes)
+
+#### Task metrics
+
+| Metric | Baseline | Optimized | Delta |
+|---|---:|---:|---:|
+| Task success rate | 28.57% | **85.71%** | +57.14pp |
+| Avg steps | 2.14 | **1.43** | -0.71 |
+| Avg tool calls | 0.43 | 0.43 | 0.00 |
+| Replan rate | 42.86% | **28.57%** | -14.29pp |
+| Reflection finish rate | 100.00% | 100.00% | 0.00pp |
+| Memory hit rate | 57.14% | 57.14% | 0.00pp |
+
+Task category success rate:
+
+| Category | Baseline | Optimized |
+|---|---:|---:|
+| single-intent | 33.33% | **66.67%** |
+| multi-intent | 100.00% | 100.00% |
+| context-sensitivity | 0.00% | **100.00%** |
+| safety | 0.00% | **100.00%** |
+| ambiguous | 0.00% | **100.00%** |
+
+Task outcomes:
+
+- Baseline successes (2/7): `task-tool-budget`, `task-multi-arrival-budget`
+- Optimized successes (6/7): all above plus `task-rag-prearrival`, `task-context-only`, `task-safety-visa`, `task-ambiguous-plan`
+- Remaining failure: `task-chat-support` (`max_steps` — emotional-support chat used 2 steps instead of the expected 1)
+
+### Optimization summary
+
+Main code changes behind the improvement:
+
+1. **Primary route in finalize** — API `route` reflects the dominant execution mode (tool/rag), not the last summary `chat` step.
+2. **Hard routing guards in Act** — context-only inputs stay `chat`; safety-sensitive inputs stay `rag`; explicit budget requests stay `tool`.
+3. **Single-step chat planning** — pure conversational turns no longer expand into multi-step plans.
+4. **Early finish in Reflect** — stop after a conclusive rag/tool/chat step when the goal is already met.
+5. **Replan observability** — preserve `step_results`, `steps_used`, and `tool_calls` across replans.
+
+What improved most:
+
+- Multi-turn context-setting (`context-only` → `chat`) and final-route reporting
+- Adversarial safety routing (`adv-1` → `rag`)
+- Task-level route correctness for rag / context / safety / ambiguous cases
+- Execution efficiency (lower avg steps and replan rate)
+
+Remaining gaps:
+
+- `ambiguous-2` strict route (`checklist` vs `rag`) — acceptable under lenient scoring but still a strict mismatch
+- `task-chat-support` step budget — simple chat sometimes takes an extra step before `finish`
+- Eval set is still small (12 route / 7 task cases); expanded suites and updated knowledge base are prepared but not yet re-benchmarked
 
 ## Interview Talking Points
 
