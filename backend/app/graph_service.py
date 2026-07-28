@@ -521,14 +521,23 @@ async def _plan_node(state: AgentState) -> AgentState:
             **memory_payload,
         }
 
-    try:
-        plan = await _llm_plan(message, chat_history, experience_context, long_term_context)
-        goal = plan.goal.strip() or message
-        subgoals = _normalize_subgoals(message, plan)
-    except Exception:
+    # For pure chat requests, avoid multi-subgoal planning to reduce step overrun.
+    # This also aligns with routing rules: when keyword routing says `chat`, we keep a 1-step plan.
+    if _keyword_route(message) == "chat":
         goal = message
         subgoals = [message]
-        logger.warning(f"trace_id={trace_id} plan_fallback=single_step reason=llm_planner_unavailable")
+        logger.trace(f"trace_id={trace_id} plan_mode=keyword_chat subgoals=1")
+    else:
+        try:
+            plan = await _llm_plan(message, chat_history, experience_context, long_term_context)
+            goal = plan.goal.strip() or message
+            subgoals = _normalize_subgoals(message, plan)
+        except Exception:
+            goal = message
+            subgoals = [message]
+            logger.warning(
+                f"trace_id={trace_id} plan_fallback=single_step reason=llm_planner_unavailable"
+            )
 
     # Keep environment goal aligned with planner restatement.
     observation = reset_env(
@@ -691,13 +700,24 @@ async def _act_node(state: AgentState) -> AgentState:
         content = (decision.content or "").strip() or (
             hints[current_step] if current_step < len(hints) else goal
         )
-        action_type = decision.action_type
+        original_action_type = decision.action_type
+        forced_action_type = _keyword_route(content)
+        # Hard-guard action type to match router semantics.
+        # This prevents experience/memory from drifting context-only/safety requests into tool/rag.
+        if forced_action_type != original_action_type:
+            action_type = forced_action_type
+        else:
+            action_type = original_action_type
+
         if action_type not in observation.available_actions:
             routed = await _decide_route(content, chat_history, trace_id)
             action_type = routed.route
             reason = f"Corrected invalid action_type; {routed.reason}"
         else:
             reason = decision.reason.strip() or "Observation→Action policy selected next step."
+            if forced_action_type != original_action_type:
+                reason = f"action_forced_by_rules (route={forced_action_type}); {reason}"
+
         decision = NextActionDecision(action_type=action_type, content=content, reason=reason)
     except Exception:
         decision, source = await _fallback_next_action(state, observation, source="hint_fallback")
@@ -1140,6 +1160,15 @@ async def _finalize_node(state: AgentState) -> AgentState:
             if tool_name not in used_tools:
                 used_tools.append(tool_name)
 
+    # "route" in API response should represent the primary execution mode of the task,
+    # not necessarily the last sub-step's route (to avoid summary-step route drift).
+    if used_tools:
+        primary_route: Route = "tool"
+    elif any(r == "rag" for r in routes) or retrieved_contexts:
+        primary_route = "rag"
+    else:
+        primary_route = "chat"
+
     last = step_results[-1]
     steps_used = state.get("steps_used", len(step_results))
     reflect_lesson = str(state.get("reflect_lesson", "")).strip()
@@ -1163,7 +1192,7 @@ async def _finalize_node(state: AgentState) -> AgentState:
     )
     return {
         "answer": answer,
-        "route": last["route"],
+        "route": primary_route,
         "router_reason": last["router_reason"],
         "sources": sources,
         "retrieved_contexts": retrieved_contexts,
