@@ -861,6 +861,26 @@ def _rule_reflect(state: AgentState) -> ReflectionDecision:
             missing_info="Latest step returned an empty answer.",
             lesson="Replan once after empty step outputs; avoid repeating the failed action path.",
         )
+    if _should_finish_after_successful_step(state):
+        return ReflectionDecision(
+            done=True,
+            next_action="finish",
+            progress=1.0,
+            goal_achieved=True,
+            missing_info="",
+            lesson=build_experience_lesson(
+                state.get("goal", state.get("message", "")),
+                routes=[item.get("route", "chat") for item in step_results],
+                tools=[
+                    tool_name
+                    for item in step_results
+                    for tool_name in item.get("used_tools", [])
+                ],
+                success=True,
+                replanned=bool(replanned),
+                steps_used=total_steps_used,
+            ),
+        )
     if current_step < len(hints) and budget_left > 0:
         return ReflectionDecision(
             done=False,
@@ -895,6 +915,31 @@ def _clamp_progress(value: float) -> float:
     return max(0.0, min(float(value), 1.0))
 
 
+def _should_finish_after_successful_step(state: AgentState) -> bool:
+    step_results = list(state.get("step_results", []))
+    if not step_results:
+        return False
+
+    latest = step_results[-1]
+    route = str(latest.get("route", "chat"))
+    answer = str(latest.get("answer", "")).strip()
+    used_tools = list(latest.get("used_tools", []))
+    sources = list(latest.get("sources", []))
+    hints = _plan_hints(state)
+    current_step = int(state.get("current_step", 0))
+    is_single_intent = len(hints) <= 1
+
+    if not answer:
+        return False
+    if route == "tool" and used_tools:
+        return True
+    if route == "rag" and sources:
+        return True
+    if route == "chat" and is_single_intent and current_step >= 1:
+        return True
+    return False
+
+
 def _apply_reflect_guards(state: AgentState, decision: ReflectionDecision) -> ReflectionDecision:
     current_step = state.get("current_step", 0)
     max_steps = state.get("max_steps", settings.max_plan_steps)
@@ -914,6 +959,10 @@ def _apply_reflect_guards(state: AgentState, decision: ReflectionDecision) -> Re
     elif not last_answer.strip() and not replanned:
         next_action = "replan"
         done = False
+    elif next_action == "continue" and _should_finish_after_successful_step(state):
+        next_action = "finish"
+        done = True
+        progress = 1.0
     elif next_action == "replan" and replanned:
         next_action = "continue" if budget_left > 0 else "finish"
         done = next_action == "finish"
