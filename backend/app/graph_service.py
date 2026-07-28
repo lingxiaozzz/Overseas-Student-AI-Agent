@@ -300,6 +300,21 @@ def _keyword_route(message: str) -> Route:
     return "chat"
 
 
+def _requires_budget_tool(message: str) -> bool:
+    message_lower = message.strip().lower()
+    if not message_lower or _is_context_only_message(message):
+        return False
+    has_budget_intent = any(
+        token in message_lower
+        for token in ("budget", "cost", "calculate", "estimate", "how much")
+    )
+    has_budget_signal = has_budget_intent or "rent" in message_lower
+    has_request_signal = ("?" in message_lower) or any(
+        hint in message_lower for hint in TASK_REQUEST_HINTS
+    )
+    return has_budget_signal and has_request_signal
+
+
 def _preview(text: str, limit: int = 180) -> str:
     cleaned = " ".join(text.split())
     if len(cleaned) <= limit:
@@ -710,18 +725,21 @@ async def _act_node(state: AgentState) -> AgentState:
             hints[current_step] if current_step < len(hints) else goal
         )
         original_action_type = decision.action_type
-        forced_action_type = _keyword_route(content)
-        # If the step-specific hint becomes too generic (and falls back to `chat`),
-        # recover the intended routing from the original user message.
-        overall_action_type = _keyword_route(state.get("message", goal))
-        if forced_action_type == "chat" and overall_action_type != "chat":
-            forced_action_type = overall_action_type
-        # Hard-guard action type to match router semantics.
-        # This prevents experience/memory from drifting context-only/safety requests into tool/rag.
-        if forced_action_type != original_action_type:
-            action_type = forced_action_type
-        else:
-            action_type = original_action_type
+        forced_action_type = original_action_type
+        # P2 hard guards:
+        # 1) Context-only first turns must stay chat.
+        # 2) Safety-sensitive inputs must stay rag.
+        # 3) If user explicitly requests budget estimation/calculation, preserve tool route.
+        if current_step == 0 and _is_context_only_message(user_message):
+            forced_action_type = "chat"
+        elif _should_force_rag_for_safety(user_message):
+            forced_action_type = "rag"
+        elif _requires_budget_tool(user_message):
+            forced_action_type = "tool"
+        elif _should_prefer_rag_for_ambiguous_plan(user_message):
+            forced_action_type = "rag"
+
+        action_type = forced_action_type
 
         if action_type not in observation.available_actions:
             routed = await _decide_route(content, chat_history, trace_id)
@@ -925,11 +943,19 @@ def _should_finish_after_successful_step(state: AgentState) -> bool:
     answer = str(latest.get("answer", "")).strip()
     used_tools = list(latest.get("used_tools", []))
     sources = list(latest.get("sources", []))
+    all_used_tools = [
+        tool_name
+        for item in step_results
+        for tool_name in list(item.get("used_tools", []))
+    ]
     hints = _plan_hints(state)
     current_step = int(state.get("current_step", 0))
     is_single_intent = len(hints) <= 1
+    user_message = str(state.get("message", state.get("goal", "")))
 
     if not answer:
+        return False
+    if _requires_budget_tool(user_message) and "estimate_weekly_budget" not in all_used_tools:
         return False
     if route == "tool" and used_tools:
         return True
