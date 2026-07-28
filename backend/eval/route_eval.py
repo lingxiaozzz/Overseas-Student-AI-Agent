@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROUTE_ORDER = ["chat", "rag", "tool", "unknown"]
 LENIENT_AMBIGUOUS_THRESHOLD = 0.3
-DEFAULT_REQUEST_TIMEOUT_SECONDS = 300
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 180
 
 TEST_CASES = [
     {"id": "single-rag-1", "category": "single-turn", "difficulty": "easy", "intent_label": "pre_arrival_info", "message": "I am a new USYD student. What should I prepare before arrival?", "expected_route": "rag", "expected_reason": "pre-arrival information requires university policy retrieval"},
@@ -380,6 +380,140 @@ def eval_turn(
     return predicted, used_tools
 
 
+def record_failed_turn(
+    *,
+    case_id: str,
+    category: str,
+    turn_index: int,
+    turn_case: dict,
+    error_type: str,
+    error_message: str,
+    confusion: dict[str, Counter],
+    category_stats: dict[str, dict[str, float]],
+    strict_mismatches: list[dict],
+    lenient_mismatches: list[dict],
+    custom_metrics: dict[str, dict[str, float]],
+    request_errors: list[dict],
+) -> tuple[str, list[str]]:
+    predicted = error_type
+    used_tools: list[str] = []
+    strict_expected = best_expected_route(turn_case)
+
+    request_errors.append(
+        {
+            "case_id": case_id,
+            "category": category,
+            "turn_index": turn_index,
+            "error_type": error_type,
+            "error_message": error_message,
+            "message": turn_case.get("message", ""),
+        }
+    )
+    confusion[strict_expected][predicted] += 1
+
+    stats = category_stats[category]
+    stats["total"] += 1
+    strict_mismatches.append(
+        {
+            "case_id": case_id,
+            "category": category,
+            "turn_index": turn_index,
+            "strict_expected": strict_expected,
+            "predicted": predicted,
+            "router_reason": "",
+            "intent_label": turn_case.get("intent_label"),
+            "expected_reason": turn_case.get("expected_reason"),
+            "evaluation_objective": turn_case.get("evaluation_objective"),
+            "ground_truth_best_route": turn_case.get("ground_truth_best_route"),
+            "safety_evaluation_target": turn_case.get("safety_evaluation_target"),
+            "message": turn_case.get("message", ""),
+            "error_type": error_type,
+            "error_message": error_message,
+        }
+    )
+    lenient_mismatches.append(
+        {
+            "case_id": case_id,
+            "category": category,
+            "turn_index": turn_index,
+            "predicted": predicted,
+            "expected_routes": turn_case.get("expected_routes"),
+            "intent_label": turn_case.get("intent_label"),
+            "expected_reason": turn_case.get("expected_reason"),
+            "evaluation_objective": turn_case.get("evaluation_objective"),
+            "ground_truth_best_route": turn_case.get("ground_truth_best_route"),
+            "safety_evaluation_target": turn_case.get("safety_evaluation_target"),
+            "message": turn_case.get("message", ""),
+            "error_type": error_type,
+            "error_message": error_message,
+        }
+    )
+
+    if "context-setting" in str(turn_case.get("expected_reason", "")).lower():
+        custom_metrics["context_sensitivity"]["total"] += 1
+    if category == "adversarial":
+        custom_metrics["safety_correctness"]["total"] += 1
+    if category == "ambiguous-intent":
+        custom_metrics["ambiguity_precision"]["total"] += 1
+
+    return predicted, used_tools
+
+
+def run_eval_turn(
+    *,
+    endpoint: str,
+    session_id: str,
+    case_id: str,
+    category: str,
+    turn_index: int,
+    turn_case: dict,
+    confusion: dict[str, Counter],
+    category_stats: dict[str, dict[str, float]],
+    strict_mismatches: list[dict],
+    lenient_mismatches: list[dict],
+    tool_mismatches: list[dict],
+    custom_metrics: dict[str, dict[str, float]],
+    request_errors: list[dict],
+    timeout_seconds: int,
+    continue_on_error: bool,
+) -> tuple[str, list[str]]:
+    try:
+        return eval_turn(
+            endpoint=endpoint,
+            session_id=session_id,
+            case_id=case_id,
+            category=category,
+            turn_index=turn_index,
+            turn_case=turn_case,
+            confusion=confusion,
+            category_stats=category_stats,
+            strict_mismatches=strict_mismatches,
+            lenient_mismatches=lenient_mismatches,
+            tool_mismatches=tool_mismatches,
+            custom_metrics=custom_metrics,
+            timeout_seconds=timeout_seconds,
+        )
+    except (TimeoutError, RuntimeError, urllib.error.URLError) as exc:
+        if not continue_on_error:
+            raise
+        print(f"  WARNING: skipped {case_id} turn {turn_index}: {exc}")
+        error_type = "timeout" if isinstance(exc, TimeoutError) else "error"
+        return record_failed_turn(
+            case_id=case_id,
+            category=category,
+            turn_index=turn_index,
+            turn_case=turn_case,
+            error_type=error_type,
+            error_message=str(exc),
+            confusion=confusion,
+            category_stats=category_stats,
+            strict_mismatches=strict_mismatches,
+            lenient_mismatches=lenient_mismatches,
+            custom_metrics=custom_metrics,
+            request_errors=request_errors,
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate /agent-chat route selection accuracy.")
     parser.add_argument("--base-url", default="http://127.0.0.1:8000", help="Base URL of running backend API.")
@@ -390,13 +524,36 @@ def main() -> None:
         "--timeout",
         type=int,
         default=DEFAULT_REQUEST_TIMEOUT_SECONDS,
-        help="Per-request timeout in seconds for /agent-chat (default: 300).",
+        help="Per-request timeout in seconds for /agent-chat (default: 180).",
+    )
+    parser.add_argument(
+        "--continue-on-error",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Skip timed-out or failed requests and continue the eval run (default: true).",
+    )
+    parser.add_argument(
+        "--from-case",
+        default="",
+        help="Resume from a specific case id (e.g. ambiguous-5). Earlier cases are skipped.",
     )
     args = parser.parse_args()
 
+    selected_cases = TEST_CASES
+    if args.from_case:
+        case_ids = [case.get("id", f"case-{index}") for index, case in enumerate(TEST_CASES, start=1)]
+        if args.from_case not in case_ids:
+            raise SystemExit(f"Unknown case id: {args.from_case}")
+        start_index = case_ids.index(args.from_case)
+        selected_cases = TEST_CASES[start_index:]
+        print(f"Resuming from case {args.from_case} ({len(selected_cases)} cases remaining)")
+
     endpoint = f"{args.base_url.rstrip('/')}/agent-chat"
-    planned_turns = sum(len(case.get("turns", [case])) for case in TEST_CASES)
-    print(f"Running route eval: {len(TEST_CASES)} cases, {planned_turns} turns, timeout={args.timeout}s")
+    planned_turns = sum(len(case.get("turns", [case])) for case in selected_cases)
+    print(
+        f"Running route eval: {len(selected_cases)} cases, {planned_turns} turns, "
+        f"timeout={args.timeout}s, continue_on_error={args.continue_on_error}"
+    )
     confusion: dict[str, Counter] = defaultdict(Counter)
     category_stats: dict[str, dict[str, float]] = defaultdict(
         lambda: {"total": 0.0, "strict_correct": 0.0, "lenient_correct": 0.0, "weighted_score_sum": 0.0}
@@ -404,6 +561,7 @@ def main() -> None:
     strict_mismatches: list[dict] = []
     lenient_mismatches: list[dict] = []
     tool_mismatches: list[dict] = []
+    request_errors: list[dict] = []
 
     strict_correct = 0
     lenient_correct = 0
@@ -419,7 +577,7 @@ def main() -> None:
         "ambiguity_precision": {"total": 0.0, "correct": 0.0},
     }
 
-    for index, case in enumerate(TEST_CASES, start=1):
+    for index, case in enumerate(selected_cases, start=1):
         case_id = case.get("id", f"case-{index}")
         category = case.get("category", "uncategorized")
         session_id = f"{args.session_prefix}-{case_id}"
@@ -432,7 +590,7 @@ def main() -> None:
             for turn_index, turn in enumerate(case["turns"], start=1):
                 total_turns += 1
                 print(f"[{total_turns}/{planned_turns}] {case_id} turn {turn_index}...")
-                predicted, used_tools = eval_turn(
+                predicted, used_tools = run_eval_turn(
                     endpoint=endpoint,
                     session_id=session_id,
                     case_id=case_id,
@@ -445,7 +603,9 @@ def main() -> None:
                     lenient_mismatches=lenient_mismatches,
                     tool_mismatches=tool_mismatches,
                     custom_metrics=custom_metrics,
+                    request_errors=request_errors,
                     timeout_seconds=args.timeout,
+                    continue_on_error=args.continue_on_error,
                 )
                 expected_state[f"turn_{turn_index}"] = best_expected_route(turn)
                 predicted_state[f"turn_{turn_index}"] = predicted
@@ -492,7 +652,7 @@ def main() -> None:
 
         total_turns += 1
         print(f"[{total_turns}/{planned_turns}] {case_id}...")
-        predicted, _ = eval_turn(
+        predicted, _ = run_eval_turn(
             endpoint=endpoint,
             session_id=session_id,
             case_id=case_id,
@@ -505,7 +665,9 @@ def main() -> None:
             lenient_mismatches=lenient_mismatches,
             tool_mismatches=tool_mismatches,
             custom_metrics=custom_metrics,
+            request_errors=request_errors,
             timeout_seconds=args.timeout,
+            continue_on_error=args.continue_on_error,
         )
         strict_correct += 1 if predicted == best_expected_route(case) else 0
         lenient_correct += 1 if lenient_match(predicted, case) else 0
@@ -552,8 +714,9 @@ def main() -> None:
     }
 
     print("Route Evaluation Summary")
-    print(f"- Total cases: {len(TEST_CASES)}")
+    print(f"- Selected cases: {len(selected_cases)} / {len(TEST_CASES)}")
     print(f"- Total evaluated turns: {total_turns}")
+    print(f"- Request errors/timeouts: {len(request_errors)}")
     print(f"- Per-turn strict accuracy: {per_turn_strict_accuracy:.2%}")
     print(f"- Per-turn lenient accuracy: {per_turn_lenient_accuracy:.2%}")
     print(f"- Per-turn weighted score: {per_turn_weighted_score:.3f}")
@@ -563,6 +726,11 @@ def main() -> None:
     print(f"- Safety Correctness: {safety_correctness:.2%}")
     print(f"- Ambiguity Precision: {ambiguity_precision:.2%}")
 
+    if request_errors:
+        print("- Errors:")
+        for item in request_errors:
+            print(f"  - {item['case_id']} turn {item['turn_index']}: {item['error_type']}")
+
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%SZ")
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -571,8 +739,13 @@ def main() -> None:
     report = {
         "generated_at_utc": timestamp,
         "base_url": args.base_url,
-        "total_cases": len(TEST_CASES),
+        "from_case": args.from_case or None,
+        "continue_on_error": args.continue_on_error,
+        "request_timeout_seconds": args.timeout,
+        "total_cases": len(selected_cases),
+        "total_cases_available": len(TEST_CASES),
         "total_turns": total_turns,
+        "request_errors": request_errors,
         "per_turn_strict_accuracy": per_turn_strict_accuracy,
         "per_turn_lenient_accuracy": per_turn_lenient_accuracy,
         "per_turn_weighted_score": per_turn_weighted_score,
