@@ -1,5 +1,7 @@
 # Overseas-Student-AI-Agent
 
+**English** | [中文](./README.zh-CN.md)
+
 A production-oriented **LLM Agent runtime** for international student support.
 
 Built with **FastAPI + LangChain + LangGraph + FAISS + Gemini**, featuring:
@@ -78,7 +80,7 @@ backend/
     schemas.py         # Request/response models
     config.py          # Settings
   demo/
-    agent_demo.py      # Interview-ready demo runner
+    agent_demo.py      # Demo runner
   eval/
     route_eval.py      # Route accuracy evaluation
     task_eval.py       # Task success / steps / tools evaluation
@@ -248,14 +250,14 @@ Reports: `eval/reports/route-eval-*.json` / `latest.json`, `task-eval-*.json` / 
 
 | Group | Suite | Before → After | Reports (route / task) |
 |---|---|---|---|
-| **A** Small | 12 route / 7 task | Baseline → Opt-1 | `084259Z`→`102435Z` / `085613Z`→`102333Z` |
+| **A** Original (small) | 12 route / 7 task | Baseline → Opt-1 | `084259Z`→`102435Z` / `085613Z`→`102333Z` |
 | **B** Expanded | 38 route / 23 task | Expanded → Opt-2 (P0/P1) | `122242Z`→`132528Z` / `105801Z`→`131442Z` |
 
-Do not compare absolute scores across groups — suite difficulty differs.
+Both are **evaluation case suites** (not training datasets). Do not compare absolute scores across groups — suite difficulty differs.
 
 ---
 
-### Group A — Small suite (Opt-1)
+### Group A — Original eval set (small, Opt-1)
 
 Opt-1: primary-route finalize; Act guards (context / safety / budget); single-step chat; Reflect early finish; replan observability.
 
@@ -271,7 +273,7 @@ Category (route strict | task success): multi-turn 25%→**100%**; adversarial 0
 
 ---
 
-### Group B — Expanded suite (Opt-2)
+### Group B — Expanded eval set (Opt-2)
 
 Opt-2: `_requires_checklist_tool()`; `_is_pure_chat_message()` + single-step finish; stronger context-only guards.
 
@@ -296,12 +298,11 @@ Safety drop note: new mixed adversarial case `adv-4` exposed a refusal-path hole
 | Budget guard too aggressive | `ambiguous-3`, `multi-mixed-1` | Mixed arrival+rent forced to `tool`, drops preferred `rag` |
 | Safety refusal → chat | `adv-4` | New boundary case; original safety cases still pass |
 | Full-path timeout | `ambiguous-5` | Timeout only on complete `/agent-chat` multi-step loop (>180s). Single-turn rag/tool themselves are not slow — not a routing-logic defect |
-| Checklist / chat over-plan (fixed in Opt-2) | Group A leftovers + Group B pre-Opt-2 failures | Checklist→rag and chat step overrun resolved by Opt-2 |
 
 ### Summary
 
 - **A:** Opt-1 → route **57%→93%**, task **29%→86%** (context, safety, final-route, fewer steps).
-- **B:** Expansion exposed checklist/chat/context gaps; Opt-2 → route **73%→91%**, task **74%→100%**.
+- **B:** Expansion exposed checklist/chat/context gaps; Opt-2 → route **73%→91%**, task **74%→100%** (checklist routing and chat over-planning fixed).
 - Strengths: RAG policy Qs, explicit budget tools, reflection finish **100%**.
 
 ### Next improvements
@@ -311,12 +312,4 @@ Safety drop note: new mixed adversarial case `adv-4` exposed a refusal-path hole
 | <span style="color:#c00"><strong>P0</strong></span> | Mixed-intent routing | Force budget/checklist only for explicit single-intent requests; prefer retrieval-first when arrival/orientation co-occurs |
 | <span style="color:#c00"><strong>P0</strong></span> | Adversarial safety | Keep refusals / prompt-injection on forced `rag`; never degrade to `chat` |
 | **P1** | Latency | Shorten `ambiguous-5`-style multi-step paths (timeout is full-agent only) |
-| **P2** | Eval hygiene | Keep `--continue-on-error`; report small vs expanded suites separately |
-
-## Interview Talking Points
-
-1. Agent runtime (plan–act–reflect), not a chatbot wrapper  
-2. Environment-decoupled Action execution  
-3. Layered memory with experience reuse  
-4. Metric-driven iteration (route + task eval)  
-5. Retries, tracing, eval write isolation  
+| **P2** | Eval hygiene | Keep `--continue-on-error`; report small vs expanded eval sets separately |

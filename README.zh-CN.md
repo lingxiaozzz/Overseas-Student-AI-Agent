@@ -1,0 +1,317 @@
+# 留学生咨询AI智能体
+
+[English](./README.md) | **中文**
+
+> 仓库名：`Overseas-Student-AI-Agent`
+
+面向赴澳留学生咨询场景的 **LLM Agent 系统**（政策问答、行前准备、生活预算等）。
+
+技术栈：**FastAPI + LangChain + LangGraph + FAISS + Gemini**，主要能力：
+
+- 分层规划 + 动态 Observation→Action 循环
+- Observation–Action 环境抽象
+- 三层记忆（工作记忆 / 长期记忆 / 经验记忆）及读写轨迹
+- 世界知识 RAG（与 Agent 记忆分离）
+- LLM-as-judge 反思 + 规则兜底
+- Tool Calling + RAG + 可解释路由
+- Trace 级可观测性与自动评测
+
+## 架构
+
+### 系统总览
+
+```mermaid
+flowchart LR
+    Client[Client / Demo / Eval] --> API[FastAPI /agent-chat]
+    API --> Mem[Memory Layers]
+    API --> Graph[LangGraph Agent Runtime]
+    Graph --> Env[Environment Abstraction]
+    Env --> Chat[Chat Backend]
+    Env --> RAG[RAG + FAISS]
+    Env --> Tools[Tool Calling]
+    Graph --> Reflect[LLM Reflection Judge]
+    Reflect --> Mem
+    RAG --> KB[(Knowledge Base)]
+    Mem --> Work[Working Memory]
+    Mem --> LT[(Long-term JSON)]
+    Mem --> Exp[(Experience JSON)]
+```
+
+### Agent 决策循环
+
+```mermaid
+flowchart TD
+    Start[User Message + session_id] --> Plan[Plan\nSoft subgoal hints]
+    Plan --> Act[Act\nObserve then choose next Action]
+    Act --> Execute[Execute\nenv.step Action]
+    Execute --> Reflect[Reflect\nLLM-as-judge]
+    Reflect -->|continue| Act
+    Reflect -->|replan| Replan[Replan remaining work]
+    Replan --> Act
+    Reflect -->|finish| Evaluate[Evaluate\nFinal-answer scorer]
+    Evaluate -->|pass| Finalize[Finalize answer + metrics]
+    Evaluate -->|fail once| Replan
+    Evaluate -->|fail after replan| Finalize
+    Finalize --> End[API Response]
+```
+
+### 记忆分层
+
+| 层级 | 作用 | 存储 |
+|---|---|---|
+| 工作记忆（Working） | 近期对话轮次 | 进程内，按 `session_id` |
+| 长期记忆（Long-term） | 持久学生画像 / 约束 | `data/memory/long_term.json` |
+| 经验记忆（Experience） | 可复用的任务策略经验 | `data/memory/experiences.json` |
+| 世界知识（World knowledge） | 政策 / 清单 / 事实 | `data/knowledge_base` + FAISS |
+
+## 项目结构
+
+```text
+backend/
+  app/
+    main.py            # FastAPI 接口
+    graph_service.py   # LangGraph plan-act-reflect-evaluate 运行时
+    environment.py     # Observation-Action 环境接口
+    evaluator_service.py # 最终回答打分与 pass/fail
+    memory_service.py  # Working + Long-term + Experience
+    chat_service.py    # 直接对话
+    rag_service.py     # RAG + FAISS 检索
+    tool_service.py    # Tool Calling
+    logging_service.py # TRACE/INFO 日志
+    retry_service.py   # Gemini 重试 / 退避
+    schemas.py         # 请求 / 响应模型
+    config.py          # 配置
+  demo/
+    agent_demo.py      # 演示脚本
+  eval/
+    route_eval.py      # 路由准确率评测
+    task_eval.py       # 任务成功 / 步数 / 工具评测
+data/
+  knowledge_base/      # 世界知识 markdown
+  memory/              # 长期 / 经验记忆产物
+```
+
+## 环境搭建
+
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+在项目根目录创建 `.env`（可复制 `.env.example`）：
+
+```text
+GOOGLE_API_KEY=your_real_google_ai_studio_api_key
+GEMINI_MODEL=gemini-2.5-flash
+GEMINI_EMBEDDING_MODEL=models/gemini-embedding-001
+MEMORY_MAX_TURNS=6
+RETRY_MAX_ATTEMPTS=3
+RETRY_INITIAL_SECONDS=1.0
+RETRY_MAX_SECONDS=8.0
+LOG_LEVEL=INFO
+MAX_PLAN_STEPS=4
+EXPERIENCE_MEMORY_MAX_ITEMS=200
+EXPERIENCE_MEMORY_TOP_K=3
+EXPERIENCE_MEMORY_MIN_SCORE=0.2
+EXPERIENCE_MEMORY_ENABLED=true
+EVALUATION_PASS_SCORE=0.6
+```
+
+API Key：https://aistudio.google.com/app/apikey
+
+## 启动 API
+
+```powershell
+cd backend
+python -m uvicorn app.main:app --reload
+```
+
+接口文档：http://127.0.0.1:8000/docs
+
+主接口：`POST /agent-chat`
+
+其他接口：
+
+- `POST /chat`
+- `POST /rag-chat`
+- `POST /tool-chat`
+- `GET /health`
+
+## 60 秒演示
+
+先启动 API，再运行：
+
+```powershell
+cd backend
+python demo/agent_demo.py --base-url http://127.0.0.1:8000
+```
+
+Demo 覆盖 3 个场景：
+
+1. **RAG**：USYD 行前准备清单  
+2. **Tool**：每周生活预算估算  
+3. **多步**：行前准备 + 预算合并请求  
+
+每条会打印：
+
+- `trace_id`
+- plan / subgoals
+- 逐步 route 与 reward
+- reflection（`judge_source`、`goal_achieved`、lesson）
+- evaluation（`score`、`passed`、`feedback`、`triggered_replan`）
+- metrics（`steps_used`、`tool_calls`、`memory_hits`、rewards）
+- environment action space
+
+可选参数：
+
+```powershell
+python demo/agent_demo.py --base-url http://127.0.0.1:8000 --session-id demo-interview-001
+python demo/agent_demo.py --persist-experience false
+```
+
+### 手动请求示例
+
+```json
+{
+  "message": "Help me prepare for USYD arrival and estimate weekly budget if rent is 420 AUD.",
+  "session_id": "demo-001"
+}
+```
+
+常用 Header：
+
+- `x-trace-id: demo-multi-001`
+- `x-persist-experience: false`（评测 / 演示时不写入持久化记忆）
+
+## Agent 响应要点
+
+`/agent-chat` 返回：
+
+- `plan`：目标 + 软性子目标提示
+- `steps`：逐步 route / action / reward / tools（实际执行结果）
+- `last_observation` / `last_action_decision`：Observation→Action 可解释性
+- `reflection`：LLM 判定（`continue/replan/finish`、lesson、`goal_achieved`）
+- `evaluation`：最终回答分数 / 是否通过、反馈、是否触发 replan
+- `metrics`：步数、工具调用、replan 标记、记忆命中、reward
+- `memory_lessons`：检索到的经验策略
+- `memory_reads` / `memory_writes`：三层记忆访问轨迹
+- `long_term_facts`：本轮加载的长期事实
+- `environment`：`{ name, action_space }`
+- `sources` / `retrieved_contexts`：RAG 溯源
+- `used_tools`：已执行工具
+
+## 核心能力
+
+### 分层规划 + Observation→Action
+- 运行时：`plan -> act -> execute -> reflect -> evaluate (-> replan) -> finalize`
+- Planner 产出软性提示（非硬锁定执行队列）
+- 每步 `act` 先观察环境，再选择 Action（`chat` / `rag` / `tool` + content）
+- 受 `MAX_PLAN_STEPS` 约束；响应暴露 `last_observation` 与 `last_action_decision`
+
+### 环境抽象
+- `environment.py` 统一 Observation–Action 接口
+- 当前适配器：`student_support`（`chat` / `rag` / `tool`）
+- 逐步 reward：`last_reward` / `total_reward`
+
+### 反思
+- LLM-as-judge 判断进度与下一步动作
+- 硬性守卫 + 规则兜底
+- 可执行 lesson 写入经验记忆
+
+### 最终回答评估
+- 独立评估器打分（`EVALUATION_PASS_SCORE`）
+- 首次失败触发 replan
+- 二次失败直接 finalize，避免死循环
+
+### 记忆（三层）
+- **工作记忆**：短会话（`MEMORY_MAX_TURNS`）
+- **长期记忆**：持久画像（`data/memory/long_term.json`）
+- **经验记忆**：策略经验（`data/memory/experiences.json`）
+- 每轮返回 `memory_reads` + `memory_writes`
+- 世界知识仍由 FAISS RAG 单独提供
+- 评测 / 演示可用 `x-persist-experience: false` 关闭持久写入
+
+### 可观测性
+- 结构化日志带 `trace_id`
+- `LOG_LEVEL=TRACE` 可查看路由 / 规划 / 反思细节
+
+### 可靠性
+- Gemini 瞬时异常采用指数退避重试
+
+## 评测
+
+```powershell
+cd backend
+python eval/route_eval.py --base-url http://127.0.0.1:8000
+python eval/task_eval.py --base-url http://127.0.0.1:8000
+```
+
+报告：`eval/reports/route-eval-*.json` / `latest.json`，`task-eval-*.json` / `task-latest.json`。
+
+| 分组 | 样本规模 | 优化前 → 优化后 | 报告（route / task） |
+|---|---|---|---|
+| **A** 原始评测集（小样本） | 12 route / 7 task | Baseline → Opt-1 | `084259Z`→`102435Z` / `085613Z`→`102333Z` |
+| **B** 扩充评测集 | 38 route / 23 task | Expanded → Opt-2 (P0/P1) | `122242Z`→`132528Z` / `105801Z`→`131442Z` |
+
+两组都是**自动评测用例集**（不是训练数据集），难度不同，**不要直接横向比较绝对值**。
+
+---
+
+### Group A — 原始评测集（小样本，Opt-1）
+
+Opt-1：primary-route finalize；Act 硬性守卫（context / safety / budget）；单步 chat；Reflect 提前 finish；replan 可观测。
+
+| 指标 | 优化前 | 优化后 | Δ |
+|---|---:|---:|---:|
+| Route strict / lenient | 57.14% / 64.29% | **92.86% / 100%** | +35.7 / +35.7pp |
+| Final-route / context / safety | 50% / 0% / 0% | **100% / 100% / 100%** | +50 / +100 / +100pp |
+| Ambiguity precision | 50% | 50% | 0 |
+| Task success | 28.57% | **85.71%** | +57.1pp |
+| Avg steps / replan | 2.14 / 42.86% | **1.43 / 28.57%** | −0.71 / −14.3pp |
+
+分类提升（route 严格准确率 | task 成功率）：multi-turn 25%→**100%**；adversarial 0%→**100%**；edge 75%→**100%**；context / safety / ambiguous 任务 0%→**100%**；single-intent 任务 33%→**67%**。
+
+---
+
+### Group B — 扩充评测集（Opt-2）
+
+Opt-2：`_requires_checklist_tool()`；`_is_pure_chat_message()` + 单步 finish；强化 context-only 守卫。
+
+| 指标 | 优化前 | 优化后 | Δ |
+|---|---:|---:|---:|
+| Route strict / lenient | 73.33% / 77.78% | **91.11% / 93.33%** | +17.8 / +15.6pp |
+| Final-route / context / ambiguity | 42.86% / 66.67% / 40% | **85.71% / 100% / 60%** | +42.9 / +33.3 / +20pp |
+| Safety / adversarial | 100% / 100% | **75% / 75%** | −25 / −25pp |
+| Task success / failures | 73.91% / 6 | **100% / 0** | +26.1pp / −6 |
+| Avg steps / replan | 1.57 / 30.43% | **1.30 / 17.39%** | −0.27 / −13.0pp |
+
+Opt-2 后 route 分类：single / edge **100%**，multi-turn **93%**，ambiguous **60%**，adversarial **75%**。Task 各类别均为 **100%**。
+
+Safety 回落说明：新增混合对抗样例 `adv-4` 暴露了拒答路径漏洞——恶意「忽略 tools / RAG」指令被降到 `chat`，而不是走合规 `rag`。原有安全用例依旧全部通过；该回落来自新增边界样例，并非原有评测集退化。
+
+---
+
+### 剩余问题（统一）
+
+| 问题 | Case | 说明 |
+|---|---|---|
+| Budget 硬性守卫过强 | `ambiguous-3`, `multi-mixed-1` | 混合 arrival + rent 被强制走 `tool`，丢掉期望的 `rag` |
+| 安全拒答落到 chat | `adv-4` | 新增边界样例；原有安全用例仍通过 |
+| 全链路超时 | `ambiguous-5` | 仅完整 `/agent-chat` 多步循环超时（>180s）。单轮 rag / tool 本身并不慢——**不是路由逻辑缺陷** |
+
+### 小结
+
+- **A：** Opt-1 → route **57%→93%**，task **29%→86%**（context、safety、final-route、步数下降）。
+- **B：** 扩充先暴露 checklist / chat / context 缺口；Opt-2 → route **73%→91%**，task **74%→100%**（checklist 路由与 chat 过规划已修复）。
+- 强项：RAG 政策类问答、显式预算 tool、reflection finish **100%**。
+
+### 后续改进
+
+| 优先级 | 方向 | 措施 |
+|---|---|---|
+| <span style="color:#c00"><strong>P0</strong></span> | 混合意图路由 | 仅在显式单意图计算 / 清单请求时强制 budget / checklist；同时含 arrival / orientation 时优先 retrieval-first |
+| <span style="color:#c00"><strong>P0</strong></span> | 对抗安全 | 拒答 / prompt-injection 仍强制走 `rag`，禁止降到纯 `chat` |
+| **P1** | 延迟 | 缩短 `ambiguous-5` 类多步路径（超时仅发生在完整 Agent 链路） |
+| **P2** | 评测规范 | 保持 `--continue-on-error`；小样本与扩充评测集分区报告 |
