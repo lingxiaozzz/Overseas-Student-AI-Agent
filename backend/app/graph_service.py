@@ -246,6 +246,47 @@ BACKGROUND_ONLY_PREFIXES = (
     "my budget is",
     "i study",
     "i will study",
+    "hello",
+    "hi,",
+    "hi ",
+    "hey",
+    "thanks",
+    "thank you",
+)
+
+BACKGROUND_INTRO_MARKERS = (
+    "international student",
+    "new usyd",
+    "starting at usyd",
+    "study at usyd",
+    "will study at usyd",
+)
+
+PURE_CHAT_KEYWORDS = {
+    "homesick",
+    "lonely",
+    "loneliness",
+    "feel stressed",
+    "stressed about",
+    "coping tips",
+    "coping strategies",
+    "making friends",
+    "feel lonely",
+    "emotional support",
+    "anxious",
+    "anxiety",
+    "just arrived",
+    "new here",
+    "new city",
+}
+
+PURE_CHAT_PHRASES = (
+    "any advice",
+    "any coping",
+    "what can i do",
+    "how can i make friends",
+    "how can i cope",
+    "any coping tips",
 )
 
 TASK_REQUEST_HINTS = {
@@ -270,7 +311,37 @@ def _is_context_only_message(message: str) -> bool:
         return False
     if any(hint in message_lower for hint in TASK_REQUEST_HINTS):
         return False
-    return any(message_lower.startswith(prefix) for prefix in BACKGROUND_ONLY_PREFIXES)
+    if any(message_lower.startswith(prefix) for prefix in BACKGROUND_ONLY_PREFIXES):
+        return True
+    return any(marker in message_lower for marker in BACKGROUND_INTRO_MARKERS)
+
+
+def _is_pure_chat_message(message: str) -> bool:
+    message_lower = message.strip().lower()
+    if not message_lower:
+        return False
+    if _requires_budget_tool(message) or _requires_checklist_tool(message):
+        return False
+    if _should_force_rag_for_safety(message):
+        return False
+    if _is_context_only_message(message):
+        return True
+    if message_lower in {"hello", "hi", "hey", "thanks", "thank you", "uh help me pls", "??"}:
+        return True
+    if any(keyword in message_lower for keyword in PURE_CHAT_KEYWORDS):
+        return True
+    if any(phrase in message_lower for phrase in PURE_CHAT_PHRASES):
+        policy_tokens = RAG_HINT_KEYWORDS | {"budget", "checklist", "calculate", "estimate"}
+        if not any(token in message_lower for token in policy_tokens):
+            return True
+    if "?" in message_lower:
+        emotional_tokens = ("feel", "lonely", "homesick", "stress", "anxious", "friend", "coping")
+        policy_tokens = RAG_HINT_KEYWORDS | {"budget", "checklist", "calculate", "estimate"}
+        has_emotional = any(token in message_lower for token in emotional_tokens)
+        has_policy = any(token in message_lower for token in policy_tokens)
+        if has_emotional and not has_policy:
+            return True
+    return False
 
 
 def _should_force_rag_for_safety(message: str) -> bool:
@@ -279,18 +350,37 @@ def _should_force_rag_for_safety(message: str) -> bool:
 
 
 def _should_prefer_rag_for_ambiguous_plan(message: str) -> bool:
+    if _requires_budget_tool(message) or _requires_checklist_tool(message):
+        return False
     message_lower = message.lower()
     has_plan_intent = "plan" in message_lower or "first month" in message_lower
     has_student_context = "student" in message_lower or "sydney" in message_lower or "usyd" in message_lower
     return has_plan_intent and has_student_context
 
 
+def _requires_checklist_tool(message: str) -> bool:
+    message_lower = message.strip().lower()
+    if not message_lower or _is_context_only_message(message):
+        return False
+    has_checklist_signal = "checklist" in message_lower
+    has_build_signal = any(
+        phrase in message_lower
+        for phrase in ("build a", "build my", "create a", "generate a", "make a")
+    ) and has_checklist_signal
+    has_request_signal = ("?" in message_lower) or any(
+        hint in message_lower for hint in TASK_REQUEST_HINTS
+    )
+    return (has_checklist_signal or has_build_signal) and has_request_signal
+
+
 def _keyword_route(message: str) -> Route:
     message_lower = message.lower()
     if _should_force_rag_for_safety(message):
         return "rag"
-    if _is_context_only_message(message):
+    if _is_context_only_message(message) or _is_pure_chat_message(message):
         return "chat"
+    if _requires_checklist_tool(message) or _requires_budget_tool(message):
+        return "tool"
     if _should_prefer_rag_for_ambiguous_plan(message):
         return "rag"
     if any(keyword in message_lower for keyword in TOOL_HINT_KEYWORDS):
@@ -376,10 +466,18 @@ async def _decide_route(message: str, chat_history: str, trace_id: str) -> Route
         reason = "Safety-sensitive or policy-bypass request detected; using rag for compliant guidance."
         logger.trace(f"trace_id={trace_id} route_decision=rag reason={reason}")
         return RouterDecision(route="rag", reason=reason)
-    if _is_context_only_message(message):
-        reason = "Background-only input without explicit task request; using chat for clarification/context."
+    if _is_context_only_message(message) or _is_pure_chat_message(message):
+        reason = "Conversational or background-only input; using chat without retrieval/tools."
         logger.trace(f"trace_id={trace_id} route_decision=chat reason={reason}")
         return RouterDecision(route="chat", reason=reason)
+    if _requires_checklist_tool(message):
+        reason = "Explicit checklist generation request; using tool."
+        logger.trace(f"trace_id={trace_id} route_decision=tool reason={reason}")
+        return RouterDecision(route="tool", reason=reason)
+    if _requires_budget_tool(message):
+        reason = "Explicit budget calculation request; using tool."
+        logger.trace(f"trace_id={trace_id} route_decision=tool reason={reason}")
+        return RouterDecision(route="tool", reason=reason)
     if _should_prefer_rag_for_ambiguous_plan(message):
         reason = "Ambiguous onboarding planning request; applying retrieval-first (rag) strategy."
         logger.trace(f"trace_id={trace_id} route_decision=rag reason={reason}")
@@ -509,11 +607,12 @@ async def _plan_node(state: AgentState) -> AgentState:
         "memory_writes": memory_writes,
     }
 
-    # Keep trivial context-only turns as single-step plans.
-    if _is_context_only_message(message):
+    # Keep trivial context-only and pure-chat turns as single-step plans.
+    if _is_context_only_message(message) or _is_pure_chat_message(message):
         goal = message
         subgoals = [message]
-        logger.trace(f"trace_id={trace_id} plan_mode=single_context subgoals=1")
+        plan_mode = "single_context" if _is_context_only_message(message) else "pure_chat"
+        logger.trace(f"trace_id={trace_id} plan_mode={plan_mode} subgoals=1")
         return {
             "goal": goal,
             "subgoals": subgoals,
@@ -530,7 +629,7 @@ async def _plan_node(state: AgentState) -> AgentState:
             "reflect_done": False,
             "reflect_next_action": "continue",
             "reflect_progress": 0.0,
-            "reflect_lesson": "Single-step context acknowledgment plan.",
+            "reflect_lesson": "Single-step conversational plan.",
             "environment_name": environment_name,
             "action_space": action_space,
             "last_reward": 0.0,
@@ -709,7 +808,11 @@ async def _act_node(state: AgentState) -> AgentState:
     try:
         user_message = state.get("message", goal)
         actor_experience_context = state.get("experience_context", "No prior experience lessons.")
-        if _is_context_only_message(user_message) or _should_force_rag_for_safety(user_message):
+        if (
+            _is_context_only_message(user_message)
+            or _is_pure_chat_message(user_message)
+            or _should_force_rag_for_safety(user_message)
+        ):
             actor_experience_context = "No prior experience lessons."
 
         decision = await _llm_next_action(
@@ -726,14 +829,19 @@ async def _act_node(state: AgentState) -> AgentState:
         )
         original_action_type = decision.action_type
         forced_action_type = original_action_type
-        # P2 hard guards:
-        # 1) Context-only first turns must stay chat.
-        # 2) Safety-sensitive inputs must stay rag.
-        # 3) If user explicitly requests budget estimation/calculation, preserve tool route.
-        if current_step == 0 and _is_context_only_message(user_message):
+        # Hard guards (order matters):
+        # 1) Pure chat / context-only inputs stay chat.
+        # 2) Safety-sensitive inputs stay rag.
+        # 3) Explicit checklist / budget requests stay tool.
+        # 4) Ambiguous onboarding plans prefer rag.
+        if _is_pure_chat_message(user_message):
+            forced_action_type = "chat"
+        elif current_step == 0 and _is_context_only_message(user_message):
             forced_action_type = "chat"
         elif _should_force_rag_for_safety(user_message):
             forced_action_type = "rag"
+        elif _requires_checklist_tool(user_message):
+            forced_action_type = "tool"
         elif _requires_budget_tool(user_message):
             forced_action_type = "tool"
         elif _should_prefer_rag_for_ambiguous_plan(user_message):
@@ -879,6 +987,27 @@ def _rule_reflect(state: AgentState) -> ReflectionDecision:
             missing_info="Latest step returned an empty answer.",
             lesson="Replan once after empty step outputs; avoid repeating the failed action path.",
         )
+    user_message = str(state.get("message", state.get("goal", "")))
+    if _is_pure_chat_message(user_message) and last_answer.strip() and current_step >= 1:
+        return ReflectionDecision(
+            done=True,
+            next_action="finish",
+            progress=1.0,
+            goal_achieved=True,
+            missing_info="",
+            lesson=build_experience_lesson(
+                state.get("goal", state.get("message", "")),
+                routes=[item.get("route", "chat") for item in step_results],
+                tools=[
+                    tool_name
+                    for item in step_results
+                    for tool_name in item.get("used_tools", [])
+                ],
+                success=True,
+                replanned=bool(replanned),
+                steps_used=total_steps_used,
+            ),
+        )
     if _should_finish_after_successful_step(state):
         return ReflectionDecision(
             done=True,
@@ -955,6 +1084,10 @@ def _should_finish_after_successful_step(state: AgentState) -> bool:
 
     if not answer:
         return False
+    if _is_pure_chat_message(user_message):
+        return route == "chat" and current_step >= 1
+    if _requires_checklist_tool(user_message) and "build_prearrival_checklist" not in all_used_tools:
+        return False
     if _requires_budget_tool(user_message) and "estimate_weekly_budget" not in all_used_tools:
         return False
     if route == "tool" and used_tools:
@@ -973,6 +1106,7 @@ def _apply_reflect_guards(state: AgentState, decision: ReflectionDecision) -> Re
     step_results = state.get("step_results", [])
     last_answer = step_results[-1]["answer"] if step_results else ""
     budget_left = _step_budget_remaining(state)
+    user_message = str(state.get("message", state.get("goal", "")))
 
     next_action = decision.next_action
     done = decision.done
@@ -982,10 +1116,18 @@ def _apply_reflect_guards(state: AgentState, decision: ReflectionDecision) -> Re
         next_action = "finish"
         done = True
         progress = 1.0
+    elif _is_pure_chat_message(user_message) and last_answer.strip() and current_step >= 1:
+        next_action = "finish"
+        done = True
+        progress = 1.0
     elif not last_answer.strip() and not replanned:
         next_action = "replan"
         done = False
     elif next_action == "continue" and _should_finish_after_successful_step(state):
+        next_action = "finish"
+        done = True
+        progress = 1.0
+    elif next_action == "replan" and _is_pure_chat_message(user_message) and last_answer.strip():
         next_action = "finish"
         done = True
         progress = 1.0
@@ -1361,7 +1503,12 @@ async def _evaluate_node(state: AgentState) -> AgentState:
 
     already_replanned = bool(state.get("replanned", False))
     previously_triggered = bool(state.get("evaluation_triggered_replan", False))
-    triggered_replan = (not decision.passed) and (not already_replanned)
+    user_message = str(state.get("message", state.get("goal", "")))
+    triggered_replan = (
+        (not decision.passed)
+        and (not already_replanned)
+        and not _is_pure_chat_message(user_message)
+    )
     next_action: Literal["finalize", "replan"] = "replan" if triggered_replan else "finalize"
 
     logger.trace(
