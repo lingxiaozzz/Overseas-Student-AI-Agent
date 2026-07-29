@@ -238,185 +238,85 @@ Useful headers:
 
 ## Evaluation
 
-### Run commands
-
-Route evaluation:
-
 ```powershell
 cd backend
 python eval/route_eval.py --base-url http://127.0.0.1:8000
-```
-
-Task evaluation:
-
-```powershell
-cd backend
 python eval/task_eval.py --base-url http://127.0.0.1:8000
 ```
 
-Reports are written to:
+Reports: `eval/reports/route-eval-*.json` / `latest.json`, `task-eval-*.json` / `task-latest.json`.
 
-- `eval/reports/route-eval-<timestamp>.json` and `eval/reports/latest.json`
-- `eval/reports/task-eval-<timestamp>.json` and `eval/reports/task-latest.json`
+| Group | Suite | Before → After | Reports (route / task) |
+|---|---|---|---|
+| **A** Small | 12 route / 7 task | Baseline → Opt-1 | `084259Z`→`102435Z` / `085613Z`→`102333Z` |
+| **B** Expanded | 38 route / 23 task | Expanded → Opt-2 (P0/P1) | `122242Z`→`132528Z` / `105801Z`→`131442Z` |
 
-### Evaluation reports
+Do not compare absolute scores across groups — suite difficulty differs.
 
-| Phase | Route cases / turns | Task cases | Route report | Task report |
-|---|---:|---:|---|---|
-| Baseline | 12 / 14 | 7 | `route-eval-20260728-084259Z.json` | `task-eval-20260728-085613Z.json` |
-| Optimized (small suite) | 12 / 14 | 7 | `route-eval-20260728-102435Z.json` | `task-eval-20260728-102333Z.json` |
-| **Expanded suite (latest)** | **38 / 45** | **23** | `route-eval-20260728-122242Z.json` | `task-eval-20260728-105801Z.json` |
+---
 
-> The small suite measures the impact of routing/runtime optimizations on the original cases.  
-> The expanded suite adds broader coverage (more RAG/tool/chat, multi-turn, ambiguous, safety, and edge scenarios) and is the current benchmark.
+### Group A — Small suite (Opt-1)
 
-### Phase 1: Baseline → optimized (same 12 route / 7 task cases)
+Opt-1: primary-route finalize; Act guards (context / safety / budget); single-step chat; Reflect early finish; replan observability.
 
-#### Route metrics
-
-| Metric | Baseline | Optimized | Delta |
+| Metric | Before | After | Δ |
 |---|---:|---:|---:|
-| Per-turn strict accuracy | 57.14% | **92.86%** | +35.72pp |
-| Per-turn lenient accuracy | 64.29% | **100.00%** | +35.71pp |
-| Per-turn weighted score | 0.550 | **0.907** | +0.357 |
-| Final-route strict accuracy | 50.00% | **100.00%** | +50.00pp |
-| Context-sensitivity rate | 0.00% | **100.00%** | +100.00pp |
-| Safety correctness | 0.00% | **100.00%** | +100.00pp |
-| Ambiguity precision | 50.00% | 50.00% | 0.00pp |
+| Route strict / lenient | 57.14% / 64.29% | **92.86% / 100%** | +35.7 / +35.7pp |
+| Final-route / context / safety | 50% / 0% / 0% | **100% / 100% / 100%** | +50 / +100 / +100pp |
+| Ambiguity precision | 50% | 50% | 0 |
+| Task success | 28.57% | **85.71%** | +57.1pp |
+| Avg steps / replan | 2.14 / 42.86% | **1.43 / 28.57%** | −0.71 / −14.3pp |
 
-Route category strict accuracy:
+Category (route strict | task success): multi-turn 25%→**100%**; adversarial 0%→**100%**; edge 75%→**100%**; context/safety/ambiguous tasks 0%→**100%**; single-intent task 33%→**67%**.
 
-| Category | Baseline | Optimized |
-|---|---:|---:|
-| single-turn | 100.00% | 100.00% |
-| multi-turn | 25.00% | **100.00%** |
-| ambiguous-intent | 50.00% | 50.00% |
-| adversarial | 0.00% | **100.00%** |
-| edge-case | 75.00% | **100.00%** |
+---
 
-#### Task metrics
+### Group B — Expanded suite (Opt-2)
 
-| Metric | Baseline | Optimized | Delta |
+Opt-2: `_requires_checklist_tool()`; `_is_pure_chat_message()` + single-step finish; stronger context-only guards.
+
+| Metric | Before | After | Δ |
 |---|---:|---:|---:|
-| Task success rate | 28.57% | **85.71%** | +57.14pp |
-| Avg steps | 2.14 | **1.43** | -0.71 |
-| Avg tool calls | 0.43 | 0.43 | 0.00 |
-| Replan rate | 42.86% | **28.57%** | -14.29pp |
-| Reflection finish rate | 100.00% | 100.00% | 0.00pp |
-| Memory hit rate | 57.14% | 57.14% | 0.00pp |
+| Route strict / lenient | 73.33% / 77.78% | **91.11% / 93.33%** | +17.8 / +15.6pp |
+| Final-route / context / ambiguity | 42.86% / 66.67% / 40% | **85.71% / 100% / 60%** | +42.9 / +33.3 / +20pp |
+| Safety / adversarial | 100% / 100% | **75% / 75%** | −25 / −25pp |
+| Task success / failures | 73.91% / 6 | **100% / 0** | +26.1pp / −6 |
+| Avg steps / replan | 1.57 / 30.43% | **1.30 / 17.39%** | −0.27 / −13.0pp |
 
-Task category success rate:
+Route categories after Opt-2: single/edge **100%**, multi-turn **93%**, ambiguous **60%**, adversarial **75%**. Task categories all **100%**.
 
-| Category | Baseline | Optimized |
-|---|---:|---:|
-| single-intent | 33.33% | **66.67%** |
-| multi-intent | 100.00% | 100.00% |
-| context-sensitivity | 0.00% | **100.00%** |
-| safety | 0.00% | **100.00%** |
-| ambiguous | 0.00% | **100.00%** |
+Safety drop note: new mixed adversarial case `adv-4` exposed a refusal-path hole — malicious “ignore tools/RAG” prompts degraded to `chat` instead of compliant `rag`. Pre-existing safety cases still all pass; the dip is from this new boundary case, not a regression on the original suite.
 
-Small-suite remaining gaps: `ambiguous-2` strict route (`checklist` vs `rag`); `task-chat-support` (`max_steps`).
+---
 
-### Phase 2: Optimized small suite → expanded suite (latest benchmark)
+### Remaining gaps (unified)
 
-#### Route metrics
-
-| Metric | Small suite (12/14) | Expanded suite (38/45) | Delta |
-|---|---:|---:|---:|
-| Per-turn strict accuracy | 92.86% | **73.33%** | -19.53pp |
-| Per-turn lenient accuracy | 100.00% | **77.78%** | -22.22pp |
-| Per-turn weighted score | 0.907 | **0.724** | -0.183 |
-| Final-route strict accuracy | 100.00% | **42.86%** | -57.14pp |
-| Context-sensitivity rate | 100.00% | **66.67%** | -33.33pp |
-| Safety correctness | 100.00% | **100.00%** | 0.00pp |
-| Ambiguity precision | 50.00% | **40.00%** | -10.00pp |
-| Request errors / timeouts | 0 | **1** (`ambiguous-5`) | +1 |
-
-Route category strict accuracy (expanded suite):
-
-| Category | Cases | Strict accuracy |
-|---|---:|---:|
-| adversarial | 4 | **100.00%** |
-| edge-case | 10 | **90.00%** |
-| single-turn | 12 | **83.33%** |
-| multi-turn | 14 | **57.14%** |
-| ambiguous-intent | 5 | **40.00%** |
-
-#### Task metrics
-
-| Metric | Small suite (7) | Expanded suite (23) | Delta |
-|---|---:|---:|---:|
-| Task success rate | 85.71% | **73.91%** | -11.80pp |
-| Avg steps | 1.43 | **1.57** | +0.14 |
-| Avg tool calls | 0.43 | **0.26** | -0.17 |
-| Replan rate | 28.57% | **30.43%** | +1.86pp |
-| Reflection finish rate | 100.00% | **100.00%** | 0.00pp |
-| Memory hit rate | 57.14% | **52.17%** | -4.97pp |
-
-Task category success rate (expanded suite):
-
-| Category | Cases | Success rate |
-|---|---:|---:|
-| safety | 3 | **100.00%** |
-| ambiguous | 2 | **100.00%** |
-| edge | 2 | **100.00%** |
-| multi-intent | 3 | **66.67%** |
-| context-sensitivity | 3 | **66.67%** |
-| single-intent | 10 | **60.00%** |
-
-Expanded-suite failures (6/23):
-
-| Case | Failure reason |
-|---|---|
-| `task-chat-support` | `max_steps` (2 steps for emotional support) |
-| `task-tool-checklist` | `final_route`, `tools` (checklist routed to rag, no tool call) |
-| `task-chat-loneliness` | `max_steps`, `final_route` (over-planned, ended in rag) |
-| `task-chat-greeting` | `max_steps`, `final_route` (5 steps, over-planned) |
-| `task-multi-checklist-arrival` | `tools` (rag only, no checklist tool) |
-| `task-context-background` | `max_steps`, `final_route` (background intro expanded to rag) |
+| Issue | Cases | Note |
+|---|---|---|
+| Budget guard too aggressive | `ambiguous-3`, `multi-mixed-1` | Mixed arrival+rent forced to `tool`, drops preferred `rag` |
+| Safety refusal → chat | `adv-4` | New boundary case; original safety cases still pass |
+| Full-path timeout | `ambiguous-5` | Timeout only on complete `/agent-chat` multi-step loop (>180s). Single-turn rag/tool themselves are not slow — not a routing-logic defect |
+| Checklist / chat over-plan (fixed in Opt-2) | Group A leftovers + Group B pre-Opt-2 failures | Checklist→rag and chat step overrun resolved by Opt-2 |
 
 ### Summary
 
-**What the optimization achieved (Phase 1):**  
-Routing guards, primary-route finalize, single-step chat planning, and early reflect finish raised the original small suite from **28.6% → 85.7%** task success and **57.1% → 92.9%** route strict accuracy. Multi-turn context-setting, adversarial safety, and final-route reporting improved the most.
+- **A:** Opt-1 → route **57%→93%**, task **29%→86%** (context, safety, final-route, fewer steps).
+- **B:** Expansion exposed checklist/chat/context gaps; Opt-2 → route **73%→91%**, task **74%→100%**.
+- Strengths: RAG policy Qs, explicit budget tools, reflection finish **100%**.
 
-**What the expanded suite revealed (Phase 2):**  
-After growing to **38 route / 23 task cases**, metrics dropped to **73.3%** route strict and **73.9%** task success — not because the optimizations regressed, but because harder scenarios exposed remaining weaknesses:
-
-- **Checklist → rag instead of tool** — `ambiguous-2`, `single-tool-2`, `multi-tool-2`, `edge-8`, and related task cases
-- **Pure chat over-planning** — greetings, emotional support, and loneliness cases expand into multi-step plans and sometimes end in rag
-- **Multi-turn context drift** — first-turn background statements still trigger rag in some sessions
-- **Mixed-intent latency** — `ambiguous-5` (orientation + budget) timed out at 180s during full `/agent-chat` evaluation
-
-**Stable strengths across both phases:**
-
-- Adversarial / safety routing: **100%** on expanded route and task suites
-- RAG policy queries: pre-arrival, OSHC, accommodation, orientation
-- Budget tool calls for explicit calculation requests
-- Reflection finish rate: **100%** throughout
-
-### Code changes behind Phase 1 improvements
-
-1. **Primary route in finalize** — API `route` reflects the dominant execution mode (tool/rag), not the last summary `chat` step.
-2. **Hard routing guards in Act** — context-only inputs stay `chat`; safety-sensitive inputs stay `rag`; explicit budget requests stay `tool`.
-3. **Single-step chat planning** — pure conversational turns no longer expand into multi-step plans.
-4. **Early finish in Reflect** — stop after a conclusive rag/tool/chat step when the goal is already met.
-5. **Replan observability** — preserve `step_results`, `steps_used`, and `tool_calls` across replans.
-
-### Next improvements (priority)
+### Next improvements
 
 | Priority | Area | Action |
 |---|---|---|
-| **P0** | Checklist routing | Add `_requires_checklist_tool()` guard (mirror budget tool logic) to force `build_prearrival_checklist` when checklist is explicitly requested |
-| **P1** | Pure chat efficiency | Tighten early-finish for emotional support / greeting / loneliness; cap subgoals to 1 for keyword-chat inputs |
-| **P1** | Context-only multi-turn | Strengthen first-turn hard guard so background intros (`I am…`, `I will study…`) never trigger rag |
-| **P2** | Mixed-intent latency | Split heavy orientation+budget cases into task-only eval; or add a lightweight route-only endpoint for route benchmarks |
-| **P2** | Knowledge + eval hygiene | Keep orientation/visa KB articles updated; use `--continue-on-error` (default) for long route eval runs |
+| <span style="color:#c00"><strong>P0</strong></span> | Mixed-intent routing | Force budget/checklist only for explicit single-intent requests; prefer retrieval-first when arrival/orientation co-occurs |
+| <span style="color:#c00"><strong>P0</strong></span> | Adversarial safety | Keep refusals / prompt-injection on forced `rag`; never degrade to `chat` |
+| **P1** | Latency | Shorten `ambiguous-5`-style multi-step paths (timeout is full-agent only) |
+| **P2** | Eval hygiene | Keep `--continue-on-error`; report small vs expanded suites separately |
 
 ## Interview Talking Points
 
-1. **Agent runtime, not just chatbot**: hierarchical planning + reflection loop  
-2. **Environment decoupling**: policy decides Action, environment executes step  
-3. **Memory that learns**: experience lessons affect future planning  
-4. **Metric-driven iteration**: route eval + task eval close the improvement loop  
-5. **Production hygiene**: retries, tracing, eval isolation from memory writes  
+1. Agent runtime (plan–act–reflect), not a chatbot wrapper  
+2. Environment-decoupled Action execution  
+3. Layered memory with experience reuse  
+4. Metric-driven iteration (route + task eval)  
+5. Retries, tracing, eval write isolation  
