@@ -294,9 +294,11 @@ def _safe_mean(values: list[float]) -> float:
 def evaluate_case(case: dict, response: dict) -> dict:
     metrics = response.get("metrics") or {}
     reflection = response.get("reflection") or {}
+    evaluation = response.get("evaluation") or {}
     plan = response.get("plan") or {}
     steps = response.get("steps") or []
     used_tools = response.get("used_tools") or []
+    sources = response.get("sources") or []
     answer = str(response.get("answer") or "")
     final_route = response.get("route", "unknown")
     step_routes = [item.get("route") for item in steps if item.get("route")]
@@ -337,12 +339,20 @@ def evaluate_case(case: dict, response: dict) -> dict:
         "predicted_final_route": final_route,
         "step_routes": step_routes,
         "used_tools": used_tools,
+        "sources": sources,
         "steps_used": steps_used,
         "tool_calls": tool_calls,
         "replanned": replanned,
         "memory_hits": memory_hits,
         "subgoals": plan.get("subgoals", []),
         "reflection_lesson": reflection.get("lesson", ""),
+        "evaluation": {
+            "passed": bool(evaluation.get("passed", False)),
+            "score": float(evaluation.get("score", 0.0)),
+            "feedback": str(evaluation.get("feedback", "")),
+            "source": evaluation.get("source", "rule_fallback"),
+            "triggered_replan": bool(evaluation.get("triggered_replan", False)),
+        },
         "answer_preview": " ".join(answer.split())[:180],
     }
 
@@ -378,6 +388,10 @@ def main() -> None:
         [1.0 if item["checks"].get("reflection_finished") else 0.0 for item in results]
     )
     memory_hit_rate = _safe_mean([1.0 if item["memory_hits"] > 0 else 0.0 for item in results])
+    evaluation_pass_rate = _safe_mean(
+        [1.0 if item["evaluation"]["passed"] else 0.0 for item in results]
+    )
+    avg_evaluation_score = _safe_mean([item["evaluation"]["score"] for item in results])
 
     by_category: dict[str, dict[str, float]] = {}
     for item in results:
@@ -402,6 +416,8 @@ def main() -> None:
     print(f"- Replan rate: {replan_rate:.2%}")
     print(f"- Reflection finish rate: {reflection_finish_rate:.2%}")
     print(f"- Memory hit rate: {memory_hit_rate:.2%}")
+    print(f"- Evaluation pass rate: {evaluation_pass_rate:.2%}")
+    print(f"- Avg evaluation score: {avg_evaluation_score:.2f}")
     for name, stats in category_metrics.items():
         print(f"- {name}: success={stats['success_rate']:.2%} ({stats['total']} tasks)")
     if failures:
@@ -424,6 +440,8 @@ def main() -> None:
         "replan_rate": replan_rate,
         "reflection_finish_rate": reflection_finish_rate,
         "memory_hit_rate": memory_hit_rate,
+        "evaluation_pass_rate": evaluation_pass_rate,
+        "avg_evaluation_score": avg_evaluation_score,
         "category_metrics": category_metrics,
         "failures": failures,
         "results": results,
