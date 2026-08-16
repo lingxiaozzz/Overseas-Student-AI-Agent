@@ -101,9 +101,13 @@ pip install -r requirements.txt
 Create `.env` in the project root (copy from `.env.example`):
 
 ```text
+LLM_PROVIDER=deepseek
 GOOGLE_API_KEY=your_real_google_ai_studio_api_key
 GEMINI_MODEL=gemini-2.5-flash
 GEMINI_EMBEDDING_MODEL=models/gemini-embedding-001
+DEEPSEEK_API_KEY=your_real_deepseek_api_key
+DEEPSEEK_MODEL=deepseek-v4-flash
+DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 MEMORY_MAX_TURNS=6
 RETRY_MAX_ATTEMPTS=3
 RETRY_INITIAL_SECONDS=1.0
@@ -118,6 +122,8 @@ EVALUATION_PASS_SCORE=0.6
 ```
 
 API key: https://aistudio.google.com/app/apikey
+
+Default chat model is DeepSeek (`deepseek-v4-flash`). Gemini (`gemini-2.5-flash`) is optional: set `LLM_PROVIDER=gemini` or pass `"llm": "gemini"` / `"model": "gemini-2.5-flash"` in the request. `deepseek-chat` is still supported. RAG embeddings still use Gemini, so `GOOGLE_API_KEY` is still required for `/rag-chat` and agent retrieval.
 
 ## Run the API
 

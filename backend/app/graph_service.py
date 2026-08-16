@@ -2,14 +2,13 @@ from functools import lru_cache
 from typing import Any, Literal, TypedDict
 
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import END, StateGraph
 from pydantic import BaseModel, Field
 
-from app.chat_service import MissingApiKeyError
 from app.config import settings
 from app.environment import Action, Observation, clear_env, get_or_create_env, reset_env
 from app.evaluator_service import compose_candidate_answer, llm_evaluate, rule_evaluate
+from app.llm_service import create_chat_model
 from app.logging_service import get_logger
 from app.memory_service import (
     build_experience_lesson,
@@ -440,9 +439,6 @@ def _step_budget_remaining(state: AgentState) -> int:
 
 
 async def _llm_route(message: str, chat_history: str) -> RouterDecision:
-    if not settings.google_api_key:
-        raise MissingApiKeyError("GOOGLE_API_KEY is not set.")
-
     prompt = ChatPromptTemplate.from_messages(
         [
             ("system", ROUTER_PROMPT),
@@ -452,11 +448,7 @@ async def _llm_route(message: str, chat_history: str) -> RouterDecision:
             ),
         ]
     )
-    model = ChatGoogleGenerativeAI(
-        model=settings.gemini_model,
-        google_api_key=settings.google_api_key,
-        temperature=0,
-    ).with_structured_output(RouterDecision)
+    model = create_chat_model(temperature=0).with_structured_output(RouterDecision)
     chain = prompt | model
     return await with_retry(lambda: chain.ainvoke({"message": message, "chat_history": chat_history}))
 
@@ -505,9 +497,6 @@ async def _llm_plan(
     experience_context: str,
     long_term_context: str,
 ) -> PlanDecision:
-    if not settings.google_api_key:
-        raise MissingApiKeyError("GOOGLE_API_KEY is not set.")
-
     prompt = ChatPromptTemplate.from_messages(
         [
             ("system", PLANNER_PROMPT),
@@ -520,11 +509,7 @@ async def _llm_plan(
             ),
         ]
     )
-    model = ChatGoogleGenerativeAI(
-        model=settings.gemini_model,
-        google_api_key=settings.google_api_key,
-        temperature=0,
-    ).with_structured_output(PlanDecision)
+    model = create_chat_model(temperature=0).with_structured_output(PlanDecision)
     chain = prompt | model
     return await with_retry(
         lambda: chain.ainvoke(
@@ -701,9 +686,6 @@ async def _llm_next_action(
     step_results: list[StepRecord],
     experience_context: str,
 ) -> NextActionDecision:
-    if not settings.google_api_key:
-        raise MissingApiKeyError("GOOGLE_API_KEY is not set.")
-
     completed = "\n".join(
         f"- step {item.get('step_index')}: [{item.get('route')}] {_preview(str(item.get('subgoal', '')), 120)} "
         f"-> {_preview(str(item.get('answer', '')), 160)}"
@@ -731,11 +713,7 @@ async def _llm_next_action(
             ),
         ]
     )
-    model = ChatGoogleGenerativeAI(
-        model=settings.gemini_model,
-        google_api_key=settings.google_api_key,
-        temperature=0,
-    ).with_structured_output(NextActionDecision)
+    model = create_chat_model(temperature=0).with_structured_output(NextActionDecision)
     chain = prompt | model
     extras = observation.extras or {}
     return await with_retry(
@@ -1154,9 +1132,6 @@ def _apply_reflect_guards(state: AgentState, decision: ReflectionDecision) -> Re
 
 
 async def _llm_reflect(state: AgentState) -> ReflectionDecision:
-    if not settings.google_api_key:
-        raise MissingApiKeyError("GOOGLE_API_KEY is not set.")
-
     step_results = state.get("step_results", [])
     latest = step_results[-1] if step_results else {}
     hints = _plan_hints(state)
@@ -1177,11 +1152,7 @@ async def _llm_reflect(state: AgentState) -> ReflectionDecision:
             ),
         ]
     )
-    model = ChatGoogleGenerativeAI(
-        model=settings.gemini_model,
-        google_api_key=settings.google_api_key,
-        temperature=0,
-    ).with_structured_output(ReflectionDecision)
+    model = create_chat_model(temperature=0).with_structured_output(ReflectionDecision)
     chain = prompt | model
     observation = state.get("last_observation", {})
     return await with_retry(

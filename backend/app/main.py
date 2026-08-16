@@ -3,7 +3,8 @@ from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request, status
 
-from app.chat_service import MissingApiKeyError, generate_chat_response
+from app.chat_service import generate_chat_response
+from app.llm_service import MissingApiKeyError, llm_override
 from app.config import settings
 from app.graph_service import run_agent_workflow
 from app.logging_service import get_logger
@@ -57,11 +58,12 @@ async def chat(request: ChatRequest, http_request: Request) -> ChatResponse:
     start = perf_counter()
     try:
         chat_history = get_chat_history_text(request.session_id)
-        answer = await generate_chat_response(request.message, chat_history=chat_history)
+        with llm_override(request.llm, request.model):
+            answer = await generate_chat_response(request.message, chat_history=chat_history)
     except MissingApiKeyError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Set GOOGLE_API_KEY in your .env file before using /chat.",
+            detail=str(exc),
         ) from exc
 
     append_turn(request.session_id, request.message, answer)
@@ -78,14 +80,15 @@ async def rag_chat(request: ChatRequest, http_request: Request) -> RagChatRespon
     start = perf_counter()
     try:
         chat_history = get_chat_history_text(request.session_id)
-        answer, sources, retrieved_contexts = await generate_rag_response(
-            request.message,
-            chat_history=chat_history,
-        )
+        with llm_override(request.llm, request.model):
+            answer, sources, retrieved_contexts = await generate_rag_response(
+                request.message,
+                chat_history=chat_history,
+            )
     except MissingApiKeyError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Set GOOGLE_API_KEY in your .env file before using /rag-chat.",
+            detail=str(exc),
         ) from exc
     except KnowledgeBaseNotFoundError as exc:
         raise HTTPException(
@@ -108,11 +111,12 @@ async def tool_chat(request: ChatRequest, http_request: Request) -> ToolChatResp
     start = perf_counter()
     try:
         chat_history = get_chat_history_text(request.session_id)
-        answer, used_tools = await generate_tool_response(request.message, chat_history=chat_history)
+        with llm_override(request.llm, request.model):
+            answer, used_tools = await generate_tool_response(request.message, chat_history=chat_history)
     except MissingApiKeyError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Set GOOGLE_API_KEY in your .env file before using /tool-chat.",
+            detail=str(exc),
         ) from exc
 
     append_turn(request.session_id, request.message, answer)
@@ -130,17 +134,18 @@ async def agent_chat(request: ChatRequest, http_request: Request) -> AgentChatRe
     start = perf_counter()
     try:
         chat_history = get_chat_history_text(request.session_id)
-        result = await run_agent_workflow(
-            request.message,
-            chat_history=chat_history,
-            trace_id=trace_id,
-            session_id=request.session_id,
-            persist_experience=_persist_experience_from_request(http_request),
-        )
+        with llm_override(request.llm, request.model):
+            result = await run_agent_workflow(
+                request.message,
+                chat_history=chat_history,
+                trace_id=trace_id,
+                session_id=request.session_id,
+                persist_experience=_persist_experience_from_request(http_request),
+            )
     except MissingApiKeyError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Set GOOGLE_API_KEY in your .env file before using /agent-chat.",
+            detail=str(exc),
         ) from exc
     except KnowledgeBaseNotFoundError as exc:
         raise HTTPException(

@@ -4,6 +4,7 @@ langchain
 langgraph
 langchain-community
 langchain-google-genai
+langchain-openai
 langchain-text-splitters
 python-dotenv
 aiohttp>=3.11.0

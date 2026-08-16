@@ -1,12 +1,11 @@
 import re
 
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
-from langchain_google_genai import ChatGoogleGenerativeAI
 
-from app.chat_service import MissingApiKeyError
-from app.config import settings
 from app.content_utils import content_to_text
+from app.llm_service import create_chat_model
 from app.retry_service import with_retry
 
 
@@ -75,15 +74,8 @@ TOOLS = [estimate_weekly_budget, build_prearrival_checklist]
 TOOLS_BY_NAME = {tool_.name: tool_ for tool_ in TOOLS}
 
 
-def _create_tool_model() -> ChatGoogleGenerativeAI:
-    if not settings.google_api_key:
-        raise MissingApiKeyError("GOOGLE_API_KEY is not set.")
-
-    return ChatGoogleGenerativeAI(
-        model=settings.gemini_model,
-        google_api_key=settings.google_api_key,
-        temperature=0.1,
-    )
+def _create_tool_model() -> BaseChatModel:
+    return create_chat_model(temperature=0.1)
 
 
 def _extract_rent(message: str) -> float:

@@ -34,7 +34,7 @@ def _before_sleep(retry_state: RetryCallState) -> None:
 
 
 async def with_retry(func: Callable[[], Awaitable[T]]) -> T:
-    """Run an async callable with exponential backoff retries for transient Gemini errors."""
+    """Run an async callable with exponential backoff retries for transient LLM errors."""
     async for attempt in AsyncRetrying(
         retry=retry_if_exception(_is_retryable_error),
         stop=stop_after_attempt(settings.retry_max_attempts),

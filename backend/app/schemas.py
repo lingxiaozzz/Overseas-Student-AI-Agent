@@ -18,6 +18,16 @@ class ChatRequest(BaseModel):
         examples=["student-001"],
         description="Conversation session identifier for short-term memory.",
     )
+    llm: str | None = Field(
+        default=None,
+        examples=["gemini", "deepseek"],
+        description="Chat provider. Leave empty to use LLM_PROVIDER (default: deepseek). Gemini remains optional.",
+    )
+    model: str | None = Field(
+        default=None,
+        examples=["gemini-2.5-flash", "deepseek-v4-flash", "deepseek-chat"],
+        description="Chat model id. Default DeepSeek is deepseek-v4-flash; also deepseek-chat. Gemini option: gemini-2.5-flash.",
+    )
 
 
 class ChatResponse(BaseModel):

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, Field
 
-from app.chat_service import MissingApiKeyError
 from app.config import settings
+from app.llm_service import create_chat_model
 from app.retry_service import with_retry
 
 EVALUATOR_PROMPT = """You are a strict final-answer evaluator for an international student assistant.
@@ -93,9 +92,6 @@ def rule_evaluate(
 
 
 async def llm_evaluate(goal: str, answer: str, plan_summary: str = "") -> EvaluationDecision:
-    if not settings.google_api_key:
-        raise MissingApiKeyError("GOOGLE_API_KEY is not set.")
-
     prompt = ChatPromptTemplate.from_messages(
         [
             ("system", EVALUATOR_PROMPT),
@@ -105,11 +101,7 @@ async def llm_evaluate(goal: str, answer: str, plan_summary: str = "") -> Evalua
             ),
         ]
     )
-    model = ChatGoogleGenerativeAI(
-        model=settings.gemini_model,
-        google_api_key=settings.google_api_key,
-        temperature=0,
-    ).with_structured_output(EvaluationDecision)
+    model = create_chat_model(temperature=0).with_structured_output(EvaluationDecision)
     chain = prompt | model
     decision = await with_retry(
         lambda: chain.ainvoke(

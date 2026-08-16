@@ -17,9 +17,13 @@ class Settings:
     """
 
     app_name: str = "Overseas Student AI Agent"
+    llm_provider: str = os.getenv("LLM_PROVIDER", "deepseek").strip().lower()
     google_api_key: str | None = os.getenv("GOOGLE_API_KEY")
     gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     embedding_model: str = os.getenv("GEMINI_EMBEDDING_MODEL", "models/gemini-embedding-001")
+    deepseek_api_key: str | None = os.getenv("DEEPSEEK_API_KEY")
+    deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+    deepseek_base_url: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
     memory_max_turns: int = int(os.getenv("MEMORY_MAX_TURNS", "6"))
     retry_max_attempts: int = int(os.getenv("RETRY_MAX_ATTEMPTS", "3"))
     retry_initial_seconds: float = float(os.getenv("RETRY_INITIAL_SECONDS", "1.0"))

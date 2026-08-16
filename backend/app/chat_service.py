@@ -1,8 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI
 
-from app.config import settings
 from app.content_utils import content_to_text
+from app.llm_service import MissingApiKeyError, create_chat_model
 from app.retry_service import with_retry
 
 
@@ -13,25 +12,17 @@ If the question needs official confirmation, remind the user to check official u
 Use prior conversation history when it helps keep responses consistent and contextual."""
 
 
-class MissingApiKeyError(RuntimeError):
-    pass
-
-
 async def generate_chat_response(message: str, chat_history: str = "") -> str:
-    if not settings.google_api_key:
-        raise MissingApiKeyError("GOOGLE_API_KEY is not set.")
-
     prompt = ChatPromptTemplate.from_messages(
         [
             ("system", SYSTEM_PROMPT),
             ("human", "Conversation history:\n{chat_history}\n\nCurrent user message:\n{message}"),
         ]
     )
-    model = ChatGoogleGenerativeAI(
-        model=settings.gemini_model,
-        google_api_key=settings.google_api_key,
-        temperature=0.2,
-    )
+    model = create_chat_model(temperature=0.2)
     chain = prompt | model
     response = await with_retry(lambda: chain.ainvoke({"message": message, "chat_history": chat_history}))
     return content_to_text(response.content)
+
+
+__all__ = ["MissingApiKeyError", "generate_chat_response"]

@@ -3,12 +3,12 @@ from functools import lru_cache
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from app.chat_service import MissingApiKeyError
 from app.config import settings
 from app.content_utils import content_to_text
+from app.llm_service import MissingApiKeyError, create_chat_model
 from app.retry_service import with_retry
 from app.schemas import RetrievedContext
 
@@ -136,11 +136,7 @@ async def generate_rag_response(
             ),
         ]
     )
-    model = ChatGoogleGenerativeAI(
-        model=settings.gemini_model,
-        google_api_key=settings.google_api_key,
-        temperature=0.2,
-    )
+    model = create_chat_model(temperature=0.2)
     chain = prompt | model
     response = await with_retry(
         lambda: chain.ainvoke({"message": message, "context": context, "chat_history": chat_history})
