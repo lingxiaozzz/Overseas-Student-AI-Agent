@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "official-fetch": {
+      "command": "python",
+      "args": ["-m", "app.mcp_official_fetch"],
+      "cwd": "${workspaceFolder}/backend"
+    }
+  }
+}

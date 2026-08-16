@@ -74,7 +74,9 @@ backend/
     memory_service.py  # Working + long-term + experience memory
     chat_service.py    # Direct chat
     rag_service.py     # RAG + FAISS retrieval
-    tool_service.py    # Tool calling
+    official_fetch.py  # Allowlisted official webpage fetch
+    mcp_official_fetch.py  # MCP server for official fetch
+    tool_service.py    # Internal tools (budget, checklist)
     logging_service.py # TRACE/INFO logging
     retry_service.py   # Gemini retry/backoff
     schemas.py         # Request/response models
@@ -120,11 +122,24 @@ EXPERIENCE_MEMORY_TOP_K=3
 EXPERIENCE_MEMORY_MIN_SCORE=0.2
 EXPERIENCE_MEMORY_ENABLED=true
 EVALUATION_PASS_SCORE=0.6
+OFFICIAL_FETCH_ENABLED=true
+OFFICIAL_FETCH_TIMEOUT_SECONDS=8.0
+OFFICIAL_FETCH_MAX_CHARS=4000
+OFFICIAL_FETCH_MAX_PAGES=2
 ```
 
 API key: https://aistudio.google.com/app/apikey
 
 Default chat model is DeepSeek (`deepseek-v4-flash`), with thinking disabled (`DEEPSEEK_THINKING=false`) to keep cost down. Conversation history is sent as separate turns so DeepSeek prefix cache can hit. Gemini (`gemini-2.5-flash`) is optional: set `LLM_PROVIDER=gemini` or pass `"llm": "gemini"` / `"model": "gemini-2.5-flash"` in the request. `deepseek-chat` is still supported. RAG embeddings still use Gemini, so `GOOGLE_API_KEY` is still required for `/rag-chat` and agent retrieval.
+
+Policy RAG also fetches allowlisted official pages (Home Affairs / Study Australia / USYD / PrivateHealth). Budget and checklist stay internal tools, not MCP. Official Fetch MCP:
+
+```powershell
+cd backend
+python -m app.mcp_official_fetch
+```
+
+Cursor is configured via `.cursor/mcp.json`. Tools: `list_official_sources`, `fetch_official_page`. Non-allowlisted URLs are rejected.
 
 ## Run the API
 

@@ -3,10 +3,9 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-
-load_dotenv()
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv()
+load_dotenv(PROJECT_ROOT / ".env")
 
 
 class Settings:
@@ -59,6 +58,15 @@ class Settings:
         os.getenv("LONG_TERM_MEMORY_MAX_FACTS_PER_WRITE", "3")
     )
     evaluation_pass_score: float = float(os.getenv("EVALUATION_PASS_SCORE", "0.6"))
+    official_fetch_enabled: bool = os.getenv("OFFICIAL_FETCH_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    official_fetch_timeout_seconds: float = float(os.getenv("OFFICIAL_FETCH_TIMEOUT_SECONDS", "8.0"))
+    official_fetch_max_chars: int = int(os.getenv("OFFICIAL_FETCH_MAX_CHARS", "4000"))
+    official_fetch_max_pages: int = int(os.getenv("OFFICIAL_FETCH_MAX_PAGES", "2"))
     knowledge_base_path: Path = PROJECT_ROOT / "data" / "knowledge_base"
     experience_memory_path: Path = PROJECT_ROOT / "data" / "memory" / "experiences.json"
     long_term_memory_path: Path = PROJECT_ROOT / "data" / "memory" / "long_term.json"

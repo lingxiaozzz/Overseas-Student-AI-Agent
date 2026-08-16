@@ -76,7 +76,9 @@ backend/
     memory_service.py  # Working + Long-term + Experience
     chat_service.py    # 直接对话
     rag_service.py     # RAG + FAISS 检索
-    tool_service.py    # Tool Calling
+    official_fetch.py  # 官方网页白名单抓取
+    mcp_official_fetch.py  # 官方 Fetch MCP
+    tool_service.py    # 内部工具（预算、清单）
     logging_service.py # TRACE/INFO 日志
     retry_service.py   # Gemini 重试 / 退避
     schemas.py         # 请求 / 响应模型
@@ -122,11 +124,24 @@ EXPERIENCE_MEMORY_TOP_K=3
 EXPERIENCE_MEMORY_MIN_SCORE=0.2
 EXPERIENCE_MEMORY_ENABLED=true
 EVALUATION_PASS_SCORE=0.6
+OFFICIAL_FETCH_ENABLED=true
+OFFICIAL_FETCH_TIMEOUT_SECONDS=8.0
+OFFICIAL_FETCH_MAX_CHARS=4000
+OFFICIAL_FETCH_MAX_PAGES=2
 ```
 
 API Key：https://aistudio.google.com/app/apikey
 
 默认对话模型是 DeepSeek（`deepseek-v4-flash`），thinking 默认关闭（`DEEPSEEK_THINKING=false`）以降低费用。对话历史拆成多轮 messages，方便 DeepSeek 前缀缓存命中。Gemini（`gemini-2.5-flash`）可选：设置 `LLM_PROVIDER=gemini`，或在请求里传 `"llm": "gemini"` / `"model": "gemini-2.5-flash"`。`deepseek-chat` 仍然可用。RAG 向量仍走 Gemini，因此 `/rag-chat` 和 Agent 检索仍需要 `GOOGLE_API_KEY`。
+
+政策类 RAG 会额外抓取白名单官方页（Home Affairs / Study Australia / USYD / PrivateHealth）。预算和清单仍是内部 tool，不走 MCP。官方 Fetch MCP：
+
+```powershell
+cd backend
+python -m app.mcp_official_fetch
+```
+
+Cursor 已配置 `.cursor/mcp.json`。工具：`list_official_sources`、`fetch_official_page`。非白名单 URL 会被拒绝。
 
 ## 启动 API
 

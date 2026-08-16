@@ -9,3 +9,4 @@ langchain-text-splitters
 python-dotenv
 aiohttp>=3.11.0
 faiss-cpu
+mcp
