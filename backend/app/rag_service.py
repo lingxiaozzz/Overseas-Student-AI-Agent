@@ -2,13 +2,13 @@ from functools import lru_cache
 
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.config import settings
 from app.content_utils import content_to_text
 from app.llm_service import MissingApiKeyError, create_chat_model
+from app.prompt_utils import cache_friendly_messages
 from app.retry_service import with_retry
 from app.schemas import RetrievedContext
 
@@ -127,19 +127,12 @@ async def generate_rag_response(
     context = _format_context(retrieved_documents)
     retrieved_contexts = _build_retrieved_contexts(scored_documents)
 
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", RAG_SYSTEM_PROMPT),
-            (
-                "human",
-                "Conversation history:\n{chat_history}\n\nQuestion:\n{message}\n\nKnowledge base context:\n{context}",
-            ),
-        ]
-    )
     model = create_chat_model(temperature=0.2)
-    chain = prompt | model
-    response = await with_retry(
-        lambda: chain.ainvoke({"message": message, "context": context, "chat_history": chat_history})
+    messages = cache_friendly_messages(
+        RAG_SYSTEM_PROMPT,
+        chat_history,
+        f"Question:\n{message}\n\nKnowledge base context:\n{context}",
     )
+    response = await with_retry(lambda: model.ainvoke(messages))
     sources = sorted({document.metadata.get("source", "unknown") for document in retrieved_documents})
     return content_to_text(response.content), sources, retrieved_contexts

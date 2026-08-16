@@ -110,6 +110,7 @@ GEMINI_EMBEDDING_MODEL=models/gemini-embedding-001
 DEEPSEEK_API_KEY=your_real_deepseek_api_key
 DEEPSEEK_MODEL=deepseek-v4-flash
 DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
+DEEPSEEK_THINKING=false
 MEMORY_MAX_TURNS=6
 RETRY_MAX_ATTEMPTS=3
 RETRY_INITIAL_SECONDS=1.0
@@ -125,7 +126,7 @@ EVALUATION_PASS_SCORE=0.6
 
 API Key：https://aistudio.google.com/app/apikey
 
-默认对话模型是 DeepSeek（`deepseek-v4-flash`）。Gemini（`gemini-2.5-flash`）可选：设置 `LLM_PROVIDER=gemini`，或在请求里传 `"llm": "gemini"` / `"model": "gemini-2.5-flash"`。`deepseek-chat` 仍然可用。RAG 向量仍走 Gemini，因此 `/rag-chat` 和 Agent 检索仍需要 `GOOGLE_API_KEY`。
+默认对话模型是 DeepSeek（`deepseek-v4-flash`），thinking 默认关闭（`DEEPSEEK_THINKING=false`）以降低费用。对话历史拆成多轮 messages，方便 DeepSeek 前缀缓存命中。Gemini（`gemini-2.5-flash`）可选：设置 `LLM_PROVIDER=gemini`，或在请求里传 `"llm": "gemini"` / `"model": "gemini-2.5-flash"`。`deepseek-chat` 仍然可用。RAG 向量仍走 Gemini，因此 `/rag-chat` 和 Agent 检索仍需要 `GOOGLE_API_KEY`。
 
 ## 启动 API
 

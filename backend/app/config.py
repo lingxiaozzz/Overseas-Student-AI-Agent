@@ -24,6 +24,13 @@ class Settings:
     deepseek_api_key: str | None = os.getenv("DEEPSEEK_API_KEY")
     deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
     deepseek_base_url: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
+    deepseek_thinking: bool = os.getenv("DEEPSEEK_THINKING", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+        "enabled",
+    }
     memory_max_turns: int = int(os.getenv("MEMORY_MAX_TURNS", "6"))
     retry_max_attempts: int = int(os.getenv("RETRY_MAX_ATTEMPTS", "3"))
     retry_initial_seconds: float = float(os.getenv("RETRY_INITIAL_SECONDS", "1.0"))

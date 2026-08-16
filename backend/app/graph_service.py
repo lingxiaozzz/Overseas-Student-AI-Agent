@@ -1,7 +1,6 @@
 from functools import lru_cache
 from typing import Any, Literal, TypedDict
 
-from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import END, StateGraph
 from pydantic import BaseModel, Field
 
@@ -10,6 +9,7 @@ from app.environment import Action, Observation, clear_env, get_or_create_env, r
 from app.evaluator_service import compose_candidate_answer, llm_evaluate, rule_evaluate
 from app.llm_service import create_chat_model
 from app.logging_service import get_logger
+from app.prompt_utils import cache_friendly_messages
 from app.memory_service import (
     build_experience_lesson,
     extract_long_term_candidates,
@@ -439,18 +439,9 @@ def _step_budget_remaining(state: AgentState) -> int:
 
 
 async def _llm_route(message: str, chat_history: str) -> RouterDecision:
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", ROUTER_PROMPT),
-            (
-                "human",
-                "Conversation history:\n{chat_history}\n\nCurrent user message:\n{message}",
-            ),
-        ]
-    )
     model = create_chat_model(temperature=0).with_structured_output(RouterDecision)
-    chain = prompt | model
-    return await with_retry(lambda: chain.ainvoke({"message": message, "chat_history": chat_history}))
+    messages = cache_friendly_messages(ROUTER_PROMPT, chat_history, message)
+    return await with_retry(lambda: model.ainvoke(messages))
 
 
 async def _decide_route(message: str, chat_history: str, trace_id: str) -> RouterDecision:
@@ -497,30 +488,20 @@ async def _llm_plan(
     experience_context: str,
     long_term_context: str,
 ) -> PlanDecision:
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", PLANNER_PROMPT),
-            (
-                "human",
-                "Conversation history (working memory):\n{chat_history}\n\n"
-                "Long-term profile facts:\n{long_term_context}\n\n"
-                "Prior experience lessons:\n{experience_context}\n\n"
-                "User goal:\n{message}",
-            ),
-        ]
-    )
     model = create_chat_model(temperature=0).with_structured_output(PlanDecision)
-    chain = prompt | model
-    return await with_retry(
-        lambda: chain.ainvoke(
-            {
-                "message": message,
-                "chat_history": chat_history,
-                "experience_context": experience_context,
-                "long_term_context": long_term_context,
-            }
-        )
+    messages = cache_friendly_messages(
+        PLANNER_PROMPT,
+        chat_history,
+        (
+            "Long-term profile facts:\n"
+            f"{long_term_context}\n\n"
+            "Prior experience lessons:\n"
+            f"{experience_context}\n\n"
+            "User goal:\n"
+            f"{message}"
+        ),
     )
+    return await with_retry(lambda: model.ainvoke(messages))
 
 
 def _normalize_subgoals(message: str, plan: PlanDecision) -> list[str]:
@@ -692,48 +673,31 @@ async def _llm_next_action(
         for item in step_results
     ) or "- none"
     unused_hints = hints[hint_index:]
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", ACTOR_PROMPT),
-            (
-                "human",
-                "Overall goal:\n{goal}\n\n"
-                "Conversation history:\n{chat_history}\n\n"
-                "Prior experience lessons:\n{experience_context}\n\n"
-                "Soft plan hints:\n{hints}\n\n"
-                "Unused hints:\n{unused_hints}\n\n"
-                "Completed steps:\n{completed}\n\n"
-                "Current observation:\n"
-                "- step_index: {step_index}\n"
-                "- completed_steps: {completed_steps}\n"
-                "- available_actions: {available_actions}\n"
-                "- last_answer_preview: {last_answer_preview}\n"
-                "- last_reward: {last_reward}\n"
-                "- last_tools: {last_tools}\n",
-            ),
-        ]
-    )
     model = create_chat_model(temperature=0).with_structured_output(NextActionDecision)
-    chain = prompt | model
     extras = observation.extras or {}
-    return await with_retry(
-        lambda: chain.ainvoke(
-            {
-                "goal": goal,
-                "chat_history": chat_history or "No prior turns.",
-                "experience_context": experience_context or "No prior experience lessons.",
-                "hints": "\n".join(f"- {item}" for item in hints) or "- none",
-                "unused_hints": "\n".join(f"- {item}" for item in unused_hints) or "- none",
-                "completed": completed,
-                "step_index": observation.step_index,
-                "completed_steps": observation.completed_steps,
-                "available_actions": ", ".join(observation.available_actions),
-                "last_answer_preview": str(extras.get("last_answer_preview", "")) or "none",
-                "last_reward": float(extras.get("last_reward", 0.0) or 0.0),
-                "last_tools": ", ".join(extras.get("last_tools", [])) or "none",
-            }
-        )
+    messages = cache_friendly_messages(
+        ACTOR_PROMPT,
+        chat_history or "",
+        (
+            f"Overall goal:\n{goal}\n\n"
+            "Prior experience lessons:\n"
+            f"{experience_context or 'No prior experience lessons.'}\n\n"
+            "Soft plan hints:\n"
+            f"{chr(10).join(f'- {item}' for item in hints) or '- none'}\n\n"
+            "Unused hints:\n"
+            f"{chr(10).join(f'- {item}' for item in unused_hints) or '- none'}\n\n"
+            "Completed steps:\n"
+            f"{completed}\n\n"
+            "Current observation:\n"
+            f"- step_index: {observation.step_index}\n"
+            f"- completed_steps: {observation.completed_steps}\n"
+            f"- available_actions: {', '.join(observation.available_actions)}\n"
+            f"- last_answer_preview: {str(extras.get('last_answer_preview', '')) or 'none'}\n"
+            f"- last_reward: {float(extras.get('last_reward', 0.0) or 0.0)}\n"
+            f"- last_tools: {', '.join(extras.get('last_tools', [])) or 'none'}\n"
+        ),
     )
+    return await with_retry(lambda: model.ainvoke(messages))
 
 
 async def _fallback_next_action(
@@ -1135,47 +1099,29 @@ async def _llm_reflect(state: AgentState) -> ReflectionDecision:
     step_results = state.get("step_results", [])
     latest = step_results[-1] if step_results else {}
     hints = _plan_hints(state)
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", REFLECTOR_PROMPT),
-            (
-                "human",
-                "Overall goal:\n{goal}\n\n"
-                "Soft plan hints:\n{subgoals}\n\n"
-                "Completed steps: {current_step}/{max_steps} (hints={hint_count})\n"
-                "Already replanned: {replanned}\n"
-                "Latest action content:\n{latest_subgoal}\n"
-                "Latest route: {latest_route}\n"
-                "Latest tools: {latest_tools}\n"
-                "Latest answer preview:\n{latest_answer}\n"
-                "Latest observation preview:\n{observation}\n",
-            ),
-        ]
-    )
-    model = create_chat_model(temperature=0).with_structured_output(ReflectionDecision)
-    chain = prompt | model
     observation = state.get("last_observation", {})
-    return await with_retry(
-        lambda: chain.ainvoke(
-            {
-                "goal": state.get("goal", state.get("message", "")),
-                "subgoals": "\n".join(f"- {item}" for item in hints) or "- none",
-                "current_step": state.get("current_step", 0),
-                "max_steps": state.get("max_steps", settings.max_plan_steps),
-                "hint_count": len(hints),
-                "replanned": bool(state.get("replanned", False)),
-                "latest_subgoal": latest.get("subgoal", ""),
-                "latest_route": latest.get("route", "unknown"),
-                "latest_tools": ", ".join(latest.get("used_tools", [])) or "none",
-                "latest_answer": _preview(str(latest.get("answer", "")), 500),
-                "observation": (
-                    f"completed_steps={observation.get('completed_steps', 0)}; "
-                    f"last_reward={observation.get('last_reward', 0.0)}; "
-                    f"last_answer_preview={_preview(str(observation.get('last_answer_preview', '')), 200)}"
-                ),
-            }
-        )
+    model = create_chat_model(temperature=0).with_structured_output(ReflectionDecision)
+    messages = cache_friendly_messages(
+        REFLECTOR_PROMPT,
+        str(state.get("chat_history", "")),
+        (
+            f"Overall goal:\n{state.get('goal', state.get('message', ''))}\n\n"
+            "Soft plan hints:\n"
+            f"{chr(10).join(f'- {item}' for item in hints) or '- none'}\n\n"
+            f"Completed steps: {state.get('current_step', 0)}/{state.get('max_steps', settings.max_plan_steps)} "
+            f"(hints={len(hints)})\n"
+            f"Already replanned: {bool(state.get('replanned', False))}\n"
+            f"Latest action content:\n{latest.get('subgoal', '')}\n"
+            f"Latest route: {latest.get('route', 'unknown')}\n"
+            f"Latest tools: {', '.join(latest.get('used_tools', [])) or 'none'}\n"
+            f"Latest answer preview:\n{_preview(str(latest.get('answer', '')), 500)}\n"
+            "Latest observation preview:\n"
+            f"completed_steps={observation.get('completed_steps', 0)}; "
+            f"last_reward={observation.get('last_reward', 0.0)}; "
+            f"last_answer_preview={_preview(str(observation.get('last_answer_preview', '')), 200)}\n"
+        ),
     )
+    return await with_retry(lambda: model.ainvoke(messages))
 
 
 async def _reflect_node(state: AgentState) -> AgentState:

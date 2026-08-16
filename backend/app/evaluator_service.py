@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.llm_service import create_chat_model
+from app.prompt_utils import cache_friendly_messages
 from app.retry_service import with_retry
 
 EVALUATOR_PROMPT = """You are a strict final-answer evaluator for an international student assistant.
@@ -92,26 +92,17 @@ def rule_evaluate(
 
 
 async def llm_evaluate(goal: str, answer: str, plan_summary: str = "") -> EvaluationDecision:
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", EVALUATOR_PROMPT),
-            (
-                "human",
-                "User goal:\n{goal}\n\nPlan summary:\n{plan_summary}\n\nCandidate answer:\n{answer}",
-            ),
-        ]
-    )
     model = create_chat_model(temperature=0).with_structured_output(EvaluationDecision)
-    chain = prompt | model
-    decision = await with_retry(
-        lambda: chain.ainvoke(
-            {
-                "goal": goal,
-                "plan_summary": plan_summary or "n/a",
-                "answer": answer,
-            }
-        )
+    messages = cache_friendly_messages(
+        EVALUATOR_PROMPT,
+        "",
+        (
+            f"User goal:\n{goal}\n\n"
+            f"Plan summary:\n{plan_summary or 'n/a'}\n\n"
+            f"Candidate answer:\n{answer}"
+        ),
     )
+    decision = await with_retry(lambda: model.ainvoke(messages))
     # Keep threshold ownership in app settings.
     passed = decision.score >= settings.evaluation_pass_score
     return EvaluationDecision(

@@ -1,11 +1,12 @@
 import re
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 
 from app.content_utils import content_to_text
 from app.llm_service import create_chat_model
+from app.prompt_utils import cache_friendly_messages
 from app.retry_service import with_retry
 
 
@@ -146,10 +147,7 @@ async def generate_tool_response(message: str, chat_history: str = "") -> tuple[
     soft_model = base_model.bind_tools(TOOLS)
     forced_model = base_model.bind_tools(TOOLS, tool_choice="any")
 
-    messages = [
-        SystemMessage(content=TOOL_SYSTEM_PROMPT),
-        HumanMessage(content=f"Conversation history:\n{chat_history}\n\nCurrent user message:\n{message}"),
-    ]
+    messages = cache_friendly_messages(TOOL_SYSTEM_PROMPT, chat_history, message)
 
     first_response = await with_retry(lambda: soft_model.ainvoke(messages))
     tool_calls = list(first_response.tool_calls or [])

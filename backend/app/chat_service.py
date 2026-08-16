@@ -1,7 +1,6 @@
-from langchain_core.prompts import ChatPromptTemplate
-
 from app.content_utils import content_to_text
 from app.llm_service import MissingApiKeyError, create_chat_model
+from app.prompt_utils import cache_friendly_messages
 from app.retry_service import with_retry
 
 
@@ -13,15 +12,9 @@ Use prior conversation history when it helps keep responses consistent and conte
 
 
 async def generate_chat_response(message: str, chat_history: str = "") -> str:
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", SYSTEM_PROMPT),
-            ("human", "Conversation history:\n{chat_history}\n\nCurrent user message:\n{message}"),
-        ]
-    )
     model = create_chat_model(temperature=0.2)
-    chain = prompt | model
-    response = await with_retry(lambda: chain.ainvoke({"message": message, "chat_history": chat_history}))
+    messages = cache_friendly_messages(SYSTEM_PROMPT, chat_history, message)
+    response = await with_retry(lambda: model.ainvoke(messages))
     return content_to_text(response.content)
 
 

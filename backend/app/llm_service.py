@@ -70,6 +70,9 @@ def create_chat_model(*, temperature: float = 0.0) -> BaseChatModel:
             api_key=settings.deepseek_api_key,
             base_url=settings.deepseek_base_url,
             temperature=temperature,
+            extra_body={
+                "thinking": {"type": "enabled" if settings.deepseek_thinking else "disabled"}
+            },
         )
     return ChatGoogleGenerativeAI(
         model=model_name,
