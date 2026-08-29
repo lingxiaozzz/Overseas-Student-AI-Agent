@@ -327,6 +327,8 @@ def _is_pure_chat_message(message: str) -> bool:
     message_lower = message.strip().lower()
     if not message_lower:
         return False
+    if _should_prefer_rag_for_onboarding_knowledge(message):
+        return False
     if _requires_budget_tool(message) or _requires_checklist_tool(message):
         return False
     if _should_force_rag_for_safety(message):
@@ -356,6 +358,37 @@ def _should_force_rag_for_safety(message: str) -> bool:
     return any(keyword in message_lower for keyword in SAFETY_HINT_KEYWORDS)
 
 
+def _should_prefer_rag_for_onboarding_knowledge(message: str) -> bool:
+    """Prefer retrieval for mixed onboarding questions before calculation tools.
+
+    A request such as "prepare before arrival and estimate rent" needs factual
+    arrival guidance first. A pure calculation like "estimate my weekly budget"
+    should continue to use the tool route.
+    """
+    message_lower = message.strip().lower()
+    onboarding_markers = (
+        "arrival",
+        "arrive",
+        "settle",
+        "settling",
+        "orientation",
+        "accommodation",
+        "housing",
+    )
+    knowledge_request_markers = (
+        "prepare",
+        "plan",
+        "settle",
+        "what should",
+        "how do",
+        "first week",
+        "first month",
+    )
+    return any(marker in message_lower for marker in onboarding_markers) and any(
+        marker in message_lower for marker in knowledge_request_markers
+    )
+
+
 def _should_prefer_rag_for_ambiguous_plan(message: str) -> bool:
     if _requires_budget_tool(message) or _requires_checklist_tool(message):
         return False
@@ -383,6 +416,8 @@ def _requires_checklist_tool(message: str) -> bool:
 def _keyword_route(message: str) -> Route:
     message_lower = message.lower()
     if _should_force_rag_for_safety(message):
+        return "rag"
+    if _should_prefer_rag_for_onboarding_knowledge(message):
         return "rag"
     if _is_context_only_message(message) or _is_pure_chat_message(message):
         return "chat"
@@ -477,6 +512,10 @@ async def _llm_route(message: str, chat_history: str) -> RouterDecision:
 async def _decide_route(message: str, chat_history: str, trace_id: str) -> RouterDecision:
     if _should_force_rag_for_safety(message):
         reason = "Safety-sensitive or policy-bypass request detected; using rag for compliant guidance."
+        logger.trace(f"trace_id={trace_id} route_decision=rag reason={reason}")
+        return RouterDecision(route="rag", reason=reason)
+    if _should_prefer_rag_for_onboarding_knowledge(message):
+        reason = "Onboarding knowledge request detected; applying retrieval-first (rag) strategy."
         logger.trace(f"trace_id={trace_id} route_decision=rag reason={reason}")
         return RouterDecision(route="rag", reason=reason)
     if _is_context_only_message(message) or _is_pure_chat_message(message):
@@ -817,14 +856,16 @@ async def _act_node(state: AgentState) -> AgentState:
         forced_action_type = original_action_type
         # Hard guards (order matters):
         # 1) Pure chat / context-only inputs stay chat.
-        # 2) Safety-sensitive inputs stay rag.
+        # 2) Safety-sensitive and onboarding-knowledge inputs stay rag.
         # 3) Explicit checklist / budget requests stay tool.
-        # 4) Ambiguous onboarding plans prefer rag.
+        # 4) Remaining ambiguous onboarding plans prefer rag.
         if _is_pure_chat_message(user_message):
             forced_action_type = "chat"
         elif current_step == 0 and _is_context_only_message(user_message):
             forced_action_type = "chat"
         elif _should_force_rag_for_safety(user_message):
+            forced_action_type = "rag"
+        elif _should_prefer_rag_for_onboarding_knowledge(user_message):
             forced_action_type = "rag"
         elif _requires_checklist_tool(user_message):
             forced_action_type = "tool"
