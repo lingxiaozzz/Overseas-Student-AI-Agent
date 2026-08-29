@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from statistics import mean
 
+from dataset_loader import load_cases
+
 
 TASK_CASES = [
     {
@@ -363,15 +365,21 @@ def main() -> None:
     parser.add_argument("--session-prefix", default="task-eval", help="Session prefix.")
     parser.add_argument("--output-dir", default="eval/reports", help="Directory for JSON reports.")
     parser.add_argument("--output-prefix", default="task-eval", help="Report filename prefix.")
+    parser.add_argument(
+        "--cases-file",
+        default="",
+        help="Optional versioned task dataset JSON. Defaults to the built-in regression suite.",
+    )
     args = parser.parse_args()
 
+    cases = load_cases(args.cases_file, suite="task") if args.cases_file else TASK_CASES
     endpoint = f"{args.base_url.rstrip('/')}/agent-chat"
     results: list[dict] = []
 
-    for index, case in enumerate(TASK_CASES, start=1):
+    for index, case in enumerate(cases, start=1):
         case_id = case["id"]
         session_id = f"{args.session_prefix}-{case_id}"
-        print(f"[{index}/{len(TASK_CASES)}] Running {case_id}...")
+        print(f"[{index}/{len(cases)}] Running {case_id}...")
         response = post_json(
             endpoint,
             {"message": case["message"], "session_id": session_id},
@@ -433,6 +441,7 @@ def main() -> None:
     report = {
         "generated_at_utc": timestamp,
         "base_url": args.base_url,
+        "dataset_file": args.cases_file or None,
         "total_tasks": len(results),
         "task_success_rate": task_success_rate,
         "avg_steps": avg_steps,
@@ -445,7 +454,7 @@ def main() -> None:
         "category_metrics": category_metrics,
         "failures": failures,
         "results": results,
-        "cases": TASK_CASES,
+        "cases": cases,
     }
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     latest_path.write_text(json.dumps(report, indent=2), encoding="utf-8")

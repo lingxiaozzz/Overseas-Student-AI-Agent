@@ -57,6 +57,8 @@ def main() -> None:
     parser.add_argument("--output-dir", default="eval/reports", help="Report root relative to backend/.")
     parser.add_argument("--label", default="", help="Optional immutable label, e.g. baseline or reranker-v1.")
     parser.add_argument("--timeout", type=int, default=180, help="Per-request route-suite timeout in seconds.")
+    parser.add_argument("--route-cases-file", default="", help="Optional versioned route dataset JSON.")
+    parser.add_argument("--task-cases-file", default="", help="Optional versioned task dataset JSON.")
     parser.add_argument("--skip-route", action="store_true")
     parser.add_argument("--skip-task", action="store_true")
     args = parser.parse_args()
@@ -73,14 +75,25 @@ def main() -> None:
 
     common_args = ["--base-url", args.base_url, "--output-dir", str(run_dir)]
     if not args.skip_route:
+        route_dataset_args = ["--cases-file", args.route_cases_file] if args.route_cases_file else []
         _run_suite(
             "route_eval.py",
-            [*common_args, "--output-prefix", "route", "--session-prefix", f"{run_id}-route", "--timeout", str(args.timeout)],
+            [
+                *common_args,
+                *route_dataset_args,
+                "--output-prefix",
+                "route",
+                "--session-prefix",
+                f"{run_id}-route",
+                "--timeout",
+                str(args.timeout),
+            ],
         )
     if not args.skip_task:
+        task_dataset_args = ["--cases-file", args.task_cases_file] if args.task_cases_file else []
         _run_suite(
             "task_eval.py",
-            [*common_args, "--output-prefix", "task", "--session-prefix", f"{run_id}-task"],
+            [*common_args, *task_dataset_args, "--output-prefix", "task", "--session-prefix", f"{run_id}-task"],
         )
 
     route_report = _load_json(run_dir / "latest.json") if not args.skip_route else None
@@ -91,6 +104,8 @@ def main() -> None:
         "generated_at_utc": timestamp,
         "label": label or None,
         "base_url": args.base_url,
+        "route_dataset_file": args.route_cases_file or None,
+        "task_dataset_file": args.task_cases_file or None,
         "route": None,
         "task": None,
     }

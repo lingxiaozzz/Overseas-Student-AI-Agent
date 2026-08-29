@@ -6,6 +6,8 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from dataset_loader import load_cases
+
 ROUTE_ORDER = ["chat", "rag", "tool", "unknown"]
 LENIENT_AMBIGUOUS_THRESHOLD = 0.3
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 180
@@ -521,6 +523,11 @@ def main() -> None:
     parser.add_argument("--output-dir", default="eval/reports", help="Directory for JSON reports.")
     parser.add_argument("--output-prefix", default="route-eval", help="Report filename prefix.")
     parser.add_argument(
+        "--cases-file",
+        default="",
+        help="Optional versioned route dataset JSON. Defaults to the built-in regression suite.",
+    )
+    parser.add_argument(
         "--timeout",
         type=int,
         default=DEFAULT_REQUEST_TIMEOUT_SECONDS,
@@ -539,9 +546,10 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    selected_cases = TEST_CASES
+    all_cases = load_cases(args.cases_file, suite="route") if args.cases_file else TEST_CASES
+    selected_cases = all_cases
     if args.from_case:
-        case_ids = [case.get("id", f"case-{index}") for index, case in enumerate(TEST_CASES, start=1)]
+        case_ids = [case.get("id", f"case-{index}") for index, case in enumerate(all_cases, start=1)]
         if args.from_case not in case_ids:
             raise SystemExit(f"Unknown case id: {args.from_case}")
         start_index = case_ids.index(args.from_case)
@@ -714,7 +722,7 @@ def main() -> None:
     }
 
     print("Route Evaluation Summary")
-    print(f"- Selected cases: {len(selected_cases)} / {len(TEST_CASES)}")
+    print(f"- Selected cases: {len(selected_cases)} / {len(all_cases)}")
     print(f"- Total evaluated turns: {total_turns}")
     print(f"- Request errors/timeouts: {len(request_errors)}")
     print(f"- Per-turn strict accuracy: {per_turn_strict_accuracy:.2%}")
@@ -743,7 +751,8 @@ def main() -> None:
         "continue_on_error": args.continue_on_error,
         "request_timeout_seconds": args.timeout,
         "total_cases": len(selected_cases),
-        "total_cases_available": len(TEST_CASES),
+        "total_cases_available": len(all_cases),
+        "dataset_file": args.cases_file or None,
         "total_turns": total_turns,
         "request_errors": request_errors,
         "per_turn_strict_accuracy": per_turn_strict_accuracy,
@@ -761,7 +770,7 @@ def main() -> None:
         "lenient_mismatches": lenient_mismatches,
         "tool_mismatches": tool_mismatches,
         "state_tracking": state_tracking,
-        "cases": TEST_CASES,
+        "cases": all_cases,
         "ambiguous_lenient_threshold": LENIENT_AMBIGUOUS_THRESHOLD,
     }
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")

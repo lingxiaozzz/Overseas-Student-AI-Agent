@@ -272,6 +272,13 @@ python eval/task_eval.py --base-url http://127.0.0.1:8000
 
 # 推荐：以同一个不可变 benchmark ID 运行两个评测套件
 python eval/run_eval.py --base-url http://127.0.0.1:8000 --label baseline
+
+# 运行独立、版本化的安全回归数据集
+python eval/route_eval.py --cases-file eval/datasets/route_safety_cases.json
+python eval/task_eval.py --cases-file eval/datasets/task_safety_cases.json
+
+# 或将两套专项数据作为同一个 benchmark 运行
+python eval/run_eval.py --label safety-v1 --route-cases-file eval/datasets/route_safety_cases.json --task-cases-file eval/datasets/task_safety_cases.json
 ```
 
 报告：`eval/reports/route-eval-*.json` / `latest.json`，`task-eval-*.json` / `task-latest.json`。

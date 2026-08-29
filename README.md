@@ -270,6 +270,13 @@ python eval/task_eval.py --base-url http://127.0.0.1:8000
 
 # Recommended: runs both suites under one immutable benchmark ID
 python eval/run_eval.py --base-url http://127.0.0.1:8000 --label baseline
+
+# Run a focused, versioned safety regression dataset
+python eval/route_eval.py --cases-file eval/datasets/route_safety_cases.json
+python eval/task_eval.py --cases-file eval/datasets/task_safety_cases.json
+
+# Or run both focused datasets as a single benchmark
+python eval/run_eval.py --label safety-v1 --route-cases-file eval/datasets/route_safety_cases.json --task-cases-file eval/datasets/task_safety_cases.json
 ```
 
 Reports: `eval/reports/route-eval-*.json` / `latest.json`, `task-eval-*.json` / `task-latest.json`.
