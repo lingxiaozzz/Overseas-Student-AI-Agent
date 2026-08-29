@@ -88,6 +88,7 @@ backend/
   eval/
     route_eval.py      # 路由准确率评测
     task_eval.py       # 任务成功 / 步数 / 工具评测
+    run_eval.py        # 统一 benchmark 入口
 data/
   knowledge_base/      # 世界知识 markdown
   memory/              # 长期 / 经验记忆产物
@@ -268,9 +269,14 @@ python demo/agent_demo.py --persist-experience false
 cd backend
 python eval/route_eval.py --base-url http://127.0.0.1:8000
 python eval/task_eval.py --base-url http://127.0.0.1:8000
+
+# 推荐：以同一个不可变 benchmark ID 运行两个评测套件
+python eval/run_eval.py --base-url http://127.0.0.1:8000 --label baseline
 ```
 
 报告：`eval/reports/route-eval-*.json` / `latest.json`，`task-eval-*.json` / `task-latest.json`。
+统一入口会为每次运行创建独立目录，并更新 `latest-summary.json`。请用 `baseline`、`reranker-v1`
+或 `runtime-budget-v1` 这类标签记录改动前后，确保比较可审计。
 
 | 分组 | 样本规模 | 优化前 → 优化后 | 报告（route / task） |
 |---|---|---|---|

@@ -86,6 +86,7 @@ backend/
   eval/
     route_eval.py      # Route accuracy evaluation
     task_eval.py       # Task success / steps / tools evaluation
+    run_eval.py        # Unified benchmark entry point
 data/
   knowledge_base/      # World knowledge markdown
   memory/              # Long-term + experience memory artifacts
@@ -266,9 +267,14 @@ Useful headers:
 cd backend
 python eval/route_eval.py --base-url http://127.0.0.1:8000
 python eval/task_eval.py --base-url http://127.0.0.1:8000
+
+# Recommended: runs both suites under one immutable benchmark ID
+python eval/run_eval.py --base-url http://127.0.0.1:8000 --label baseline
 ```
 
 Reports: `eval/reports/route-eval-*.json` / `latest.json`, `task-eval-*.json` / `task-latest.json`.
+The unified runner writes an isolated folder per run plus `latest-summary.json`; use a label such as
+`baseline`, `reranker-v1`, or `runtime-budget-v1` to make before/after comparisons auditable.
 
 | Group | Suite | Before → After | Reports (route / task) |
 |---|---|---|---|
