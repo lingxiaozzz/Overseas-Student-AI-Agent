@@ -10,6 +10,7 @@ Built with **FastAPI + LangChain + LangGraph + FAISS + Gemini**, featuring:
 - Observation-Action environment abstraction
 - Layered memory (working / long-term / experience) with read/write traces
 - World knowledge via RAG (separate from agent memory)
+- Language-aware RAG: Chinese queries prefer `*.zh-CN.md`, with cross-language fallback
 - LLM-as-judge reflection with guarded fallback
 - Tool calling + RAG + explainable routing
 - Trace-level observability and evaluation suites
@@ -89,7 +90,7 @@ backend/
     rag_eval.py        # Retrieval Recall@K / MRR evaluation
     run_eval.py        # Unified benchmark entry point
 data/
-  knowledge_base/      # World knowledge markdown
+  knowledge_base/      # World knowledge markdown, including Chinese `*.zh-CN.md` documents
   memory/              # Long-term + experience memory artifacts
 ```
 

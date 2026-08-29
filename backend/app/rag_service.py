@@ -1,4 +1,5 @@
 from functools import lru_cache
+import re
 
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
@@ -27,6 +28,19 @@ class KnowledgeBaseNotFoundError(RuntimeError):
     pass
 
 
+_CHINESE_CHARACTER_RE = re.compile(r"[\u4e00-\u9fff]")
+_RETRIEVAL_TOP_K = 3
+_RETRIEVAL_CANDIDATE_K = 24
+
+
+def _document_language(file_name: str) -> str:
+    return "zh-CN" if file_name.lower().endswith(".zh-cn.md") else "en"
+
+
+def _query_language(message: str) -> str:
+    return "zh-CN" if _CHINESE_CHARACTER_RE.search(message) else "en"
+
+
 def _load_knowledge_base_documents() -> list[Document]:
     knowledge_base_path = settings.knowledge_base_path
     if not knowledge_base_path.exists():
@@ -38,7 +52,10 @@ def _load_knowledge_base_documents() -> list[Document]:
         documents.append(
             Document(
                 page_content=content,
-                metadata={"source": file_path.name},
+                metadata={
+                    "source": file_path.name,
+                    "language": _document_language(file_path.name),
+                },
             )
         )
 
@@ -118,6 +135,22 @@ def _build_retrieved_contexts(
     ]
 
 
+def _select_language_aware_documents(
+    scored_documents: list[tuple[Document, float]],
+    *,
+    preferred_language: str,
+    top_k: int = _RETRIEVAL_TOP_K,
+) -> list[tuple[Document, float]]:
+    """Prefer the query language without dropping cross-language fallback coverage."""
+    preferred = [
+        item for item in scored_documents if item[0].metadata.get("language", "en") == preferred_language
+    ]
+    fallback = [
+        item for item in scored_documents if item[0].metadata.get("language", "en") != preferred_language
+    ]
+    return [*preferred, *fallback][:top_k]
+
+
 def _append_source_citations(answer: str, sources: list[str]) -> str:
     """Always expose the source-number mapping even if the model omits inline citations."""
     if not sources:
@@ -133,7 +166,12 @@ async def generate_rag_response(
         raise MissingApiKeyError("GOOGLE_API_KEY is not set.")
 
     vector_store = _build_vector_store()
-    scored_documents = vector_store.similarity_search_with_score(message, k=3)
+    preferred_language = _query_language(message)
+    candidates = vector_store.similarity_search_with_score(message, k=_RETRIEVAL_CANDIDATE_K)
+    scored_documents = _select_language_aware_documents(
+        candidates,
+        preferred_language=preferred_language,
+    )
     retrieved_documents = [document for document, _score in scored_documents]
     retrieved_contexts = _build_retrieved_contexts(scored_documents)
     official_pages = await fetch_official_pages_for_query(message)

@@ -12,6 +12,7 @@
 - Observation–Action 环境抽象
 - 三层记忆（工作记忆 / 长期记忆 / 经验记忆）及读写轨迹
 - 世界知识 RAG（与 Agent 记忆分离）
+- 语言感知 RAG：中文问题优先检索 `*.zh-CN.md`，资料不足时再跨语言回退
 - LLM-as-judge 反思 + 规则兜底
 - Tool Calling + RAG + 可解释路由
 - Trace 级可观测性与自动评测
@@ -91,7 +92,7 @@ backend/
     rag_eval.py        # 检索 Recall@K / MRR 评测
     run_eval.py        # 统一 benchmark 入口
 data/
-  knowledge_base/      # 世界知识 markdown
+  knowledge_base/      # 世界知识 markdown，中文文档使用 `*.zh-CN.md`
   memory/              # 长期 / 经验记忆产物
 ```
 

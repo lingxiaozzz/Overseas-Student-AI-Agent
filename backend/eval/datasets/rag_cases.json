@@ -1,37 +1,301 @@
 {
   "schema_version": 1,
   "suite": "rag",
-  "description": "Knowledge-base retrieval regression set. Relevant sources name the expected markdown documents.",
+  "description": "Thirty-case knowledge-base retrieval regression set. Each source is tested with direct, paraphrased, checklist, and boundary-oriented queries.",
   "cases": [
     {
-      "id": "rag-prearrival",
+      "id": "prearrival-1-direct",
       "category": "pre-arrival",
       "message": "What should I prepare before arriving at USYD as an international student?",
       "relevant_sources": ["usyd_prearrival.md"]
     },
     {
-      "id": "rag-oshc",
+      "id": "prearrival-2-documents",
+      "category": "pre-arrival",
+      "message": "Which documents should I bring to Sydney before starting at USYD?",
+      "relevant_sources": ["usyd_prearrival.md"]
+    },
+    {
+      "id": "prearrival-3-first-week-funds",
+      "category": "pre-arrival",
+      "message": "How should I prepare money and transport for my first week after landing in Sydney?",
+      "relevant_sources": ["usyd_prearrival.md"]
+    },
+    {
+      "id": "prearrival-4-checklist",
+      "category": "pre-arrival",
+      "message": "Give me the essential pre-departure checklist for a University of Sydney student.",
+      "relevant_sources": ["usyd_prearrival.md"]
+    },
+    {
+      "id": "prearrival-5-no-housing",
+      "category": "pre-arrival",
+      "message": "I do not have a long-term room yet. What should I arrange before flying to Sydney?",
+      "relevant_sources": ["usyd_prearrival.md"]
+    },
+    {
+      "id": "prearrival-6-enrolment",
+      "category": "pre-arrival",
+      "message": "What should I check in the USYD student portal before I arrive?",
+      "relevant_sources": ["usyd_prearrival.md"]
+    },
+    {
+      "id": "oshc-1-direct",
       "category": "health-cover",
       "message": "Do international students need OSHC and what does it cover?",
       "relevant_sources": ["oshc.md"]
     },
     {
-      "id": "rag-orientation",
+      "id": "oshc-2-duration",
+      "category": "health-cover",
+      "message": "How long should my Overseas Student Health Cover last?",
+      "relevant_sources": ["oshc.md"]
+    },
+    {
+      "id": "oshc-3-travel-insurance",
+      "category": "health-cover",
+      "message": "Is OSHC the same thing as travel insurance?",
+      "relevant_sources": ["oshc.md"]
+    },
+    {
+      "id": "oshc-4-policy-certificate",
+      "category": "health-cover",
+      "message": "Why should I keep my OSHC policy certificate?",
+      "relevant_sources": ["oshc.md"]
+    },
+    {
+      "id": "oshc-5-coverage-boundary",
+      "category": "health-cover",
+      "message": "Can OSHC help with doctor visits, hospital treatment, and prescriptions?",
+      "relevant_sources": ["oshc.md"]
+    },
+    {
+      "id": "oshc-6-choosing-cover",
+      "category": "health-cover",
+      "message": "What exclusions or waiting periods should I check before relying on my student health cover?",
+      "relevant_sources": ["oshc.md"]
+    },
+    {
+      "id": "orientation-1-direct",
       "category": "orientation",
       "message": "What should I expect during orientation week at USYD?",
       "relevant_sources": ["orientation.md"]
     },
     {
-      "id": "rag-accommodation",
+      "id": "orientation-2-bring-items",
+      "category": "orientation",
+      "message": "Which documents should I bring for on-campus orientation registration?",
+      "relevant_sources": ["orientation.md"]
+    },
+    {
+      "id": "orientation-3-services",
+      "category": "orientation",
+      "message": "Will orientation introduce academic support and international student advisers?",
+      "relevant_sources": ["orientation.md"]
+    },
+    {
+      "id": "orientation-4-campus-basics",
+      "category": "orientation",
+      "message": "How can I find libraries, student services, and lecture buildings at the Camperdown campus?",
+      "relevant_sources": ["orientation.md"]
+    },
+    {
+      "id": "orientation-5-student-id",
+      "category": "orientation",
+      "message": "When should I collect my student ID and confirm that my enrolment is active?",
+      "relevant_sources": ["orientation.md"]
+    },
+    {
+      "id": "orientation-6-social",
+      "category": "orientation",
+      "message": "Are there faculty welcome events or activities to meet other new students?",
+      "relevant_sources": ["orientation.md"]
+    },
+    {
+      "id": "accommodation-1-direct",
       "category": "accommodation",
       "message": "What accommodation options should a new USYD student consider?",
       "relevant_sources": ["accommodation.md"]
     },
     {
-      "id": "rag-visa-compliance",
-      "category": "visa",
+      "id": "accommodation-2-suburbs",
+      "category": "accommodation",
+      "message": "Which suburbs are commonly convenient for University of Sydney students?",
+      "relevant_sources": ["accommodation.md"]
+    },
+    {
+      "id": "accommodation-3-deposit-safety",
+      "category": "accommodation",
+      "message": "Is it safe to pay a Sydney rental deposit before I inspect the property?",
+      "relevant_sources": ["accommodation.md"]
+    },
+    {
+      "id": "accommodation-4-cost-checklist",
+      "category": "accommodation",
+      "message": "Besides weekly rent, what housing costs should I budget for in Sydney?",
+      "relevant_sources": ["accommodation.md"]
+    },
+    {
+      "id": "accommodation-5-short-term",
+      "category": "accommodation",
+      "message": "Should I book short-term housing first if I am unsure about a long-term lease?",
+      "relevant_sources": ["accommodation.md"]
+    },
+    {
+      "id": "accommodation-6-inspection",
+      "category": "accommodation",
+      "message": "What should I verify during a room inspection or video inspection?",
+      "relevant_sources": ["accommodation.md"]
+    },
+    {
+      "id": "visa-1-direct",
+      "category": "visa-compliance",
       "message": "What student visa compliance responsibilities should I keep in mind?",
       "relevant_sources": ["visa_compliance.md"]
+    },
+    {
+      "id": "visa-2-work-rights",
+      "category": "visa-compliance",
+      "message": "Where should I check the exact work-hour limits for my student visa?",
+      "relevant_sources": ["visa_compliance.md"]
+    },
+    {
+      "id": "visa-3-illegal-work",
+      "category": "visa-compliance",
+      "message": "Can I accept a cash-only job that is not officially declared?",
+      "relevant_sources": ["visa_compliance.md"]
+    },
+    {
+      "id": "visa-4-contact-update",
+      "category": "visa-compliance",
+      "message": "What should I do if my address or personal circumstances change while studying?",
+      "relevant_sources": ["visa_compliance.md"]
+    },
+    {
+      "id": "visa-5-enrolment-progress",
+      "category": "visa-compliance",
+      "message": "Why do I need to maintain enrolment, attendance, and course progress?",
+      "relevant_sources": ["visa_compliance.md"]
+    },
+    {
+      "id": "visa-6-scam-boundary",
+      "category": "visa-compliance",
+      "message": "A third party promises a guaranteed visa using fake documents. What should I do?",
+      "relevant_sources": ["visa_compliance.md"]
+    },
+    {
+      "id": "fees-1-census",
+      "category": "fees-withdrawal",
+      "message": "Why should I check the census date before dropping a unit?",
+      "relevant_sources": ["fees_census_withdrawal.md"]
+    },
+    {
+      "id": "fees-2-late-withdrawal",
+      "category": "fees-withdrawal",
+      "message": "I am thinking about a late withdrawal. What impacts should I check first?",
+      "relevant_sources": ["fees_census_withdrawal.md"]
+    },
+    {
+      "id": "enrolment-1-load-change",
+      "category": "enrolment",
+      "message": "What should I consider before reducing my study load as an international student?",
+      "relevant_sources": ["enrolment_course_load.md"]
+    },
+    {
+      "id": "enrolment-2-prerequisites",
+      "category": "enrolment",
+      "message": "How can I check whether changing a unit will affect prerequisites or my degree plan?",
+      "relevant_sources": ["enrolment_course_load.md"]
+    },
+    {
+      "id": "integrity-1-ai-tools",
+      "category": "academic-integrity",
+      "message": "Can I use AI tools for my USYD assessment?",
+      "relevant_sources": ["academic_support_integrity.md"]
+    },
+    {
+      "id": "integrity-2-collaboration",
+      "category": "academic-integrity",
+      "message": "What should I do if I am unsure whether collaboration is allowed on an assignment?",
+      "relevant_sources": ["academic_support_integrity.md"]
+    },
+    {
+      "id": "wellbeing-1-support",
+      "category": "health-wellbeing",
+      "message": "I feel overwhelmed after arriving in Sydney. What support should I seek?",
+      "relevant_sources": ["health_wellbeing_emergency.md"]
+    },
+    {
+      "id": "wellbeing-2-emergency",
+      "category": "health-wellbeing",
+      "message": "What should I do if there is an immediate safety emergency on campus?",
+      "relevant_sources": ["health_wellbeing_emergency.md"]
+    },
+    {
+      "id": "prearrival-zh-1-checklist",
+      "category": "pre-arrival-zh",
+      "message": "我是悉尼大学国际学生，出发前需要准备什么？",
+      "relevant_sources": ["usyd_prearrival.zh-CN.md"]
+    },
+    {
+      "id": "prearrival-zh-2-documents",
+      "category": "pre-arrival-zh",
+      "message": "去悉尼读书前，哪些材料建议随身携带或备份？",
+      "relevant_sources": ["usyd_prearrival.zh-CN.md"]
+    },
+    {
+      "id": "oshc-zh-1-coverage",
+      "category": "health-cover-zh",
+      "message": "OSHC 是什么？一般可以保障哪些医疗服务？",
+      "relevant_sources": ["oshc.zh-CN.md"]
+    },
+    {
+      "id": "oshc-zh-2-difference",
+      "category": "health-cover-zh",
+      "message": "OSHC 和旅行保险有什么区别？",
+      "relevant_sources": ["oshc.zh-CN.md"]
+    },
+    {
+      "id": "accommodation-zh-1-deposit",
+      "category": "accommodation-zh",
+      "message": "没有核实房源之前，可以先交悉尼租房押金吗？",
+      "relevant_sources": ["accommodation.zh-CN.md"]
+    },
+    {
+      "id": "orientation-zh-1-content",
+      "category": "orientation-zh",
+      "message": "悉尼大学迎新周一般会安排什么活动？",
+      "relevant_sources": ["orientation.zh-CN.md"]
+    },
+    {
+      "id": "visa-zh-1-work",
+      "category": "visa-compliance-zh",
+      "message": "学生签证期间找工作时，哪些做法可能违反规定？",
+      "relevant_sources": ["visa_compliance.zh-CN.md"]
+    },
+    {
+      "id": "fees-zh-1-withdrawal",
+      "category": "fees-withdrawal-zh",
+      "message": "考虑退课之前，为什么要先确认 census date？",
+      "relevant_sources": ["fees_census_withdrawal.zh-CN.md"]
+    },
+    {
+      "id": "enrolment-zh-1-load",
+      "category": "enrolment-zh",
+      "message": "国际学生想减少学习负荷前应该检查什么？",
+      "relevant_sources": ["enrolment_course_load.zh-CN.md"]
+    },
+    {
+      "id": "integrity-zh-1-ai",
+      "category": "academic-integrity-zh",
+      "message": "做悉尼大学作业时可以直接使用 AI 生成内容吗？",
+      "relevant_sources": ["academic_support_integrity.zh-CN.md"]
+    },
+    {
+      "id": "wellbeing-zh-1-emergency",
+      "category": "health-wellbeing-zh",
+      "message": "如果我在校园遇到即时安全风险，应该先做什么？",
+      "relevant_sources": ["health_wellbeing_emergency.zh-CN.md"]
     }
   ]
 }
