@@ -23,6 +23,7 @@ from app.api.schemas import (
     ToolChatResponse,
 )
 from app.core.config import settings
+from app.core.cache_metrics import cache_metrics
 from app.core.llm import MissingApiKeyError, llm_override
 from app.core.logging import get_logger
 from app.memory.service import append_turn, get_chat_history_text, write_working_memory
@@ -51,6 +52,12 @@ def _persist_experience_from_request(request: Request) -> bool:
 @app.get("/health")
 async def health_check() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/metrics/llm-cache")
+async def llm_cache_metrics() -> dict[str, int | float | str]:
+    """Return process-lifetime DeepSeek cache usage without exposing prompt content."""
+    return {"provider": "deepseek", **cache_metrics.snapshot()}
 
 
 @app.post("/chat", response_model=ChatResponse)

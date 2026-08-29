@@ -6,6 +6,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 
+from app.core.cache_metrics import DeepSeekUsageCallback
 from app.core.config import settings
 
 
@@ -73,6 +74,7 @@ def create_chat_model(*, temperature: float = 0.0) -> BaseChatModel:
             extra_body={
                 "thinking": {"type": "enabled" if settings.deepseek_thinking else "disabled"}
             },
+            callbacks=[DeepSeekUsageCallback()],
         )
     return ChatGoogleGenerativeAI(
         model=model_name,
