@@ -128,6 +128,7 @@ EXPERIENCE_MEMORY_MAX_ITEMS=200
 EXPERIENCE_MEMORY_TOP_K=3
 EXPERIENCE_MEMORY_MIN_SCORE=0.2
 EXPERIENCE_MEMORY_ENABLED=true
+LONG_TERM_MEMORY_TTL_DAYS=180
 EVALUATION_PASS_SCORE=0.6
 OFFICIAL_FETCH_ENABLED=true
 OFFICIAL_FETCH_TIMEOUT_SECONDS=8.0
@@ -258,6 +259,7 @@ python demo/agent_demo.py --persist-experience false
 ### 记忆（三层）
 - **工作记忆**：短会话（`MEMORY_MAX_TURNS`）
 - **长期记忆**：持久画像（`data/memory/long_term.json`）
+- 长期事实保存 `key`、`value`、`confidence`、`status` 与时间戳；新画像会将同 key 旧值标记为 `superseded`，超过 TTL 的事实不会被读取
 - **经验记忆**：策略经验（`data/memory/experiences.json`）
 - 每轮返回 `memory_reads` + `memory_writes`
 - 世界知识仍由 FAISS RAG 单独提供

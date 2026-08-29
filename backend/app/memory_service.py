@@ -13,7 +13,9 @@ from app.config import settings
 
 MemoryLayer = Literal["working", "long_term", "experience"]
 MemoryOperation = Literal["read", "write"]
-MemoryStatus = Literal["hit", "miss", "wrote", "updated", "skipped", "deduped"]
+MemoryStatus = Literal[
+    "hit", "miss", "wrote", "updated", "skipped", "deduped", "superseded", "expired"
+]
 
 _MEMORY_LOCK = Lock()
 _SESSION_MEMORY: dict[str, deque[tuple[str, str]]] = defaultdict(
@@ -36,6 +38,7 @@ _DURABLE_FACT_HINTS = (
     "i will study",
     "i study",
     "i live",
+    "i moved to",
     "my rent",
     "my budget",
     "international student",
@@ -48,6 +51,59 @@ _DURABLE_FACT_HINTS = (
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _parse_utc(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _long_term_fact_attributes(fact: str) -> tuple[str, str]:
+    """Extract a stable profile key where a new value should replace an old one."""
+    compact = " ".join(fact.split()).strip()
+    lower = compact.lower()
+
+    city_match = re.search(r"\b(?:i live in|i moved to)\s+([^.,;]+)", compact, flags=re.IGNORECASE)
+    if city_match:
+        return "city", city_match.group(1).strip()
+
+    rent_match = re.search(
+        r"\b(?:my\s+)?rent\s+(?:is|=|around)\s*(\d+(?:\.\d+)?)\s*(aud|a\$|\$)?",
+        lower,
+    )
+    if rent_match:
+        return "rent_per_week_aud", f"{rent_match.group(1)} AUD/week"
+
+    budget_match = re.search(
+        r"\b(?:my\s+)?budget\s+(?:is|=|around)\s*(\d+(?:\.\d+)?)\s*(aud|a\$|\$)?",
+        lower,
+    )
+    if budget_match:
+        return "budget_per_week_aud", f"{budget_match.group(1)} AUD/week"
+
+    if "university of sydney" in lower or "usyd" in lower:
+        return "university", "USYD"
+
+    # Unknown facts remain independently addressable rather than being incorrectly merged.
+    return f"fact:{' '.join(sorted(_tokenize(compact)))}", compact
+
+
+def _record_is_expired(record: dict[str, Any]) -> bool:
+    ttl_days = settings.long_term_memory_ttl_days
+    if ttl_days <= 0:
+        return False
+    updated_at = _parse_utc(record.get("updated_at") or record.get("created_at"))
+    if updated_at is None:
+        return False
+    return (datetime.now(timezone.utc) - updated_at).days >= ttl_days
+
+
+def _record_is_active(record: dict[str, Any]) -> bool:
+    return record.get("status", "active") == "active" and not _record_is_expired(record)
 
 
 def _experience_path() -> Path:
@@ -306,7 +362,9 @@ def format_long_term_context(records: list[dict[str, Any]]) -> str:
     for index, record in enumerate(records, start=1):
         fact = str(record.get("fact", "")).strip()
         if fact:
-            lines.append(f"{index}. {fact}")
+            key = str(record.get("key", "fact")).strip()
+            confidence = float(record.get("confidence", 1.0))
+            lines.append(f"{index}. {fact} (key={key}; confidence={confidence:.2f})")
     return "\n".join(lines) if lines else "No long-term profile facts."
 
 
@@ -321,7 +379,7 @@ def retrieve_long_term(
 
     with _MEMORY_LOCK:
         store = _load_long_term_unlocked()
-        records = list(store.get(session_id, []))
+        records = [record for record in store.get(session_id, []) if _record_is_active(record)]
 
     if not records:
         return []
@@ -407,29 +465,59 @@ def upsert_long_term_facts(
 
     wrote = 0
     updated = 0
+    superseded = 0
+    expired = 0
     with _MEMORY_LOCK:
         store = _load_long_term_unlocked()
         records = list(store.get(session_id, []))
-        by_fact = {
-            str(item.get("fact", "")).strip().lower(): item
-            for item in records
-            if str(item.get("fact", "")).strip()
-        }
+        now = _utc_now()
+        for item in records:
+            if item.get("status", "active") == "active" and _record_is_expired(item):
+                item["status"] = "expired"
+                item["status_changed_at"] = now
+                expired += 1
+
         for fact in cleaned:
-            key = fact.lower()
-            if key in by_fact:
-                by_fact[key]["updated_at"] = _utc_now()
-                by_fact[key]["source"] = source
+            memory_key, value = _long_term_fact_attributes(fact)
+            active_for_key = [
+                item
+                for item in records
+                if item.get("status", "active") == "active"
+                and str(item.get("key") or _long_term_fact_attributes(str(item.get("fact", "")))[0])
+                == memory_key
+            ]
+            exact = next(
+                (item for item in active_for_key if str(item.get("fact", "")).strip().lower() == fact.lower()),
+                None,
+            )
+            if exact is not None:
+                exact.update(
+                    {
+                        "key": memory_key,
+                        "value": value,
+                        "confidence": 0.95,
+                        "status": "active",
+                        "updated_at": now,
+                        "source": source,
+                    }
+                )
                 updated += 1
             else:
+                for item in active_for_key:
+                    item["status"] = "superseded"
+                    item["superseded_at"] = now
+                    superseded += 1
                 record = {
+                    "key": memory_key,
+                    "value": value,
                     "fact": fact,
+                    "confidence": 0.95,
+                    "status": "active",
                     "source": source,
-                    "created_at": _utc_now(),
-                    "updated_at": _utc_now(),
+                    "created_at": now,
+                    "updated_at": now,
                 }
                 records.append(record)
-                by_fact[key] = record
                 wrote += 1
 
         max_items = settings.long_term_memory_max_items
@@ -445,7 +533,10 @@ def upsert_long_term_facts(
         layer="long_term",
         operation="write",
         status=status,
-        detail=f"Long-term memory write: created={wrote}, updated={updated}.",
+        detail=(
+            f"Long-term memory write: created={wrote}, updated={updated}, "
+            f"superseded={superseded}, expired={expired}."
+        ),
         count=wrote + updated,
         items=[_preview(item, 70) for item in cleaned],
     )

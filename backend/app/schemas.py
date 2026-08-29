@@ -120,7 +120,7 @@ class ActionDecisionInfo(BaseModel):
 class MemoryEvent(BaseModel):
     layer: Literal["working", "long_term", "experience"]
     operation: Literal["read", "write"]
-    status: Literal["hit", "miss", "wrote", "updated", "skipped", "deduped"]
+    status: Literal["hit", "miss", "wrote", "updated", "skipped", "deduped", "superseded", "expired"]
     detail: str = ""
     count: int = 0
     items: list[str] = Field(default_factory=list)

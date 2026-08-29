@@ -126,6 +126,7 @@ EXPERIENCE_MEMORY_MAX_ITEMS=200
 EXPERIENCE_MEMORY_TOP_K=3
 EXPERIENCE_MEMORY_MIN_SCORE=0.2
 EXPERIENCE_MEMORY_ENABLED=true
+LONG_TERM_MEMORY_TTL_DAYS=180
 EVALUATION_PASS_SCORE=0.6
 OFFICIAL_FETCH_ENABLED=true
 OFFICIAL_FETCH_TIMEOUT_SECONDS=8.0
@@ -256,6 +257,7 @@ Useful headers:
 ### Memory (3 layers)
 - **Working memory**: short-term session turns (`MEMORY_MAX_TURNS`)
 - **Long-term memory**: durable student profile/constraints (`data/memory/long_term.json`)
+- Long-term facts store `key`, `value`, `confidence`, `status`, and timestamps; conflicting profile values supersede old facts and stale records are excluded after the configured TTL
 - **Experience memory**: reusable strategy lessons (`data/memory/experiences.json`)
 - Each `/agent-chat` turn returns `memory_reads` + `memory_writes` with layer/status/count/items
 - World knowledge remains separate via FAISS RAG

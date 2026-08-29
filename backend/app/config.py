@@ -60,6 +60,7 @@ class Settings:
     long_term_memory_max_facts_per_write: int = int(
         os.getenv("LONG_TERM_MEMORY_MAX_FACTS_PER_WRITE", "3")
     )
+    long_term_memory_ttl_days: int = int(os.getenv("LONG_TERM_MEMORY_TTL_DAYS", "180"))
     evaluation_pass_score: float = float(os.getenv("EVALUATION_PASS_SCORE", "0.6"))
     official_fetch_enabled: bool = os.getenv("OFFICIAL_FETCH_ENABLED", "true").lower() in {
         "1",
