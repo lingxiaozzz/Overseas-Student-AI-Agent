@@ -18,6 +18,7 @@ from typing import Any
 
 
 EVAL_DIR = Path(__file__).resolve().parent
+DEFAULT_REPORTS_ROOT = EVAL_DIR.parents[1] / "data" / "eval_reports"
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -59,7 +60,11 @@ def _print_summary(summary: dict[str, Any]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run route, task, and RAG evaluation as one benchmark.")
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
-    parser.add_argument("--output-dir", default="eval/reports", help="Report root relative to backend/.")
+    parser.add_argument(
+        "--output-dir",
+        default=str(DEFAULT_REPORTS_ROOT),
+        help="Report root. Defaults to data/eval_reports.",
+    )
     parser.add_argument("--label", default="", help="Optional immutable label, e.g. baseline or reranker-v1.")
     parser.add_argument("--timeout", type=int, default=180, help="Per-request route-suite timeout in seconds.")
     parser.add_argument("--route-cases-file", default="", help="Optional versioned route dataset JSON.")
@@ -79,16 +84,16 @@ def main() -> None:
     label = "".join(char if char.isalnum() or char in "-_" else "-" for char in args.label).strip("-")
     run_id = f"{timestamp}-{label}" if label else timestamp
     report_root = (EVAL_DIR.parent / args.output_dir).resolve()
-    run_dir = report_root / run_id
+    run_dir = report_root / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=False)
 
-    common_args = ["--base-url", args.base_url, "--output-dir", str(run_dir)]
     if not args.skip_route:
         route_dataset_args = ["--cases-file", args.route_cases_file] if args.route_cases_file else []
         _run_suite(
             "route_eval.py",
             [
-                *common_args,
+                "--base-url", args.base_url,
+                "--output-dir", str(run_dir / "route"),
                 *route_dataset_args,
                 "--output-prefix",
                 "route",
@@ -102,14 +107,21 @@ def main() -> None:
         task_dataset_args = ["--cases-file", args.task_cases_file] if args.task_cases_file else []
         _run_suite(
             "task_eval.py",
-            [*common_args, *task_dataset_args, "--output-prefix", "task", "--session-prefix", f"{run_id}-task"],
+            [
+                "--base-url", args.base_url,
+                "--output-dir", str(run_dir / "task"),
+                *task_dataset_args,
+                "--output-prefix", "task",
+                "--session-prefix", f"{run_id}-task",
+            ],
         )
     if not args.skip_rag:
         rag_dataset_args = ["--cases-file", args.rag_cases_file] if args.rag_cases_file else []
         _run_suite(
             "rag_eval.py",
             [
-                *common_args,
+                "--base-url", args.base_url,
+                "--output-dir", str(run_dir / "rag"),
                 *rag_dataset_args,
                 "--output-prefix",
                 "rag",
@@ -120,9 +132,9 @@ def main() -> None:
             ],
         )
 
-    route_report = _load_json(run_dir / "latest.json") if not args.skip_route else None
-    task_report = _load_json(run_dir / "task-latest.json") if not args.skip_task else None
-    rag_report = _load_json(run_dir / "rag-latest.json") if not args.skip_rag else None
+    route_report = _load_json(run_dir / "route" / "latest.json") if not args.skip_route else None
+    task_report = _load_json(run_dir / "task" / "task-latest.json") if not args.skip_task else None
+    rag_report = _load_json(run_dir / "rag" / "rag-latest.json") if not args.skip_rag else None
     summary: dict[str, Any] = {
         "schema_version": 1,
         "run_id": run_id,

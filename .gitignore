@@ -219,6 +219,7 @@ __marimo__/
 
 # Evaluation report artifacts
 backend/eval/reports/*.json
+data/eval_reports/
 
 # Persistent episodic/experience memory artifacts
 data/memory/*.json

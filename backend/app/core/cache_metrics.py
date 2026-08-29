@@ -14,6 +14,35 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _normalise_usage(usage: Mapping[str, Any]) -> dict[str, int]:
+    """Normalise OpenAI-compatible and Responses API usage payloads."""
+    prompt_tokens = int(usage.get("prompt_tokens", usage.get("input_tokens", 0)) or 0)
+    output_tokens = int(usage.get("completion_tokens", usage.get("output_tokens", 0)) or 0)
+    input_details = usage.get("input_tokens_details") or {}
+    if not isinstance(input_details, Mapping):
+        input_details = {}
+    cache_hit_tokens = int(
+        usage.get(
+            "prompt_cache_hit_tokens",
+            usage.get("cache_hit_tokens", input_details.get("cached_tokens", 0)),
+        )
+        or 0
+    )
+    cache_miss_tokens = int(
+        usage.get(
+            "prompt_cache_miss_tokens",
+            usage.get("cache_miss_tokens", max(prompt_tokens - cache_hit_tokens, 0)),
+        )
+        or 0
+    )
+    return {
+        "prompt_tokens": prompt_tokens,
+        "cache_hit_tokens": cache_hit_tokens,
+        "cache_miss_tokens": cache_miss_tokens,
+        "output_tokens": output_tokens,
+    }
+
+
 class _CacheMetrics:
     def __init__(self) -> None:
         self._lock = Lock()
@@ -24,17 +53,11 @@ class _CacheMetrics:
         self._output_tokens = 0
 
     def record(self, usage: Mapping[str, Any]) -> None:
-        prompt_tokens = int(usage.get("prompt_tokens", usage.get("input_tokens", 0)) or 0)
-        output_tokens = int(usage.get("completion_tokens", usage.get("output_tokens", 0)) or 0)
-        input_details = usage.get("input_tokens_details") or {}
-        if not isinstance(input_details, Mapping):
-            input_details = {}
-        cache_hit_tokens = int(
-            usage.get("prompt_cache_hit_tokens", input_details.get("cached_tokens", 0)) or 0
-        )
-        cache_miss_tokens = int(
-            usage.get("prompt_cache_miss_tokens", max(prompt_tokens - cache_hit_tokens, 0)) or 0
-        )
+        normalized = _normalise_usage(usage)
+        prompt_tokens = normalized["prompt_tokens"]
+        cache_hit_tokens = normalized["cache_hit_tokens"]
+        cache_miss_tokens = normalized["cache_miss_tokens"]
+        output_tokens = normalized["output_tokens"]
 
         with self._lock:
             self._requests += 1
@@ -66,7 +89,6 @@ class _CacheMetrics:
                 "cache_hit_rate": round(hit_rate, 4),
             }
 
-
 cache_metrics = _CacheMetrics()
 
 
@@ -78,4 +100,3 @@ class DeepSeekUsageCallback(BaseCallbackHandler):
         usage = llm_output.get("token_usage") or llm_output.get("usage")
         if isinstance(usage, Mapping):
             cache_metrics.record(usage)
-

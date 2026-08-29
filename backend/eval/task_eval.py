@@ -6,10 +6,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from statistics import mean
 
+from cache_metrics import fetch_cache_metrics, persist_cache_run
 from dataset_loader import load_cases
 
 
 DEFAULT_CASES_FILE = Path(__file__).resolve().parent / "datasets" / "task_cases.json"
+DEFAULT_REPORTS_DIR = Path(__file__).resolve().parents[2] / "data" / "eval_reports" / "task"
 
 
 def post_json(url: str, payload: dict, headers: dict[str, str] | None = None) -> dict:
@@ -103,7 +105,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate /agent-chat task-level planning metrics.")
     parser.add_argument("--base-url", default="http://127.0.0.1:8000", help="Base URL of running backend API.")
     parser.add_argument("--session-prefix", default="task-eval", help="Session prefix.")
-    parser.add_argument("--output-dir", default="eval/reports", help="Directory for JSON reports.")
+    parser.add_argument(
+        "--output-dir",
+        default=str(DEFAULT_REPORTS_DIR),
+        help="Directory for task JSON reports. Defaults to data/eval_reports/task.",
+    )
     parser.add_argument("--output-prefix", default="task-eval", help="Report filename prefix.")
     parser.add_argument(
         "--cases-file",
@@ -114,6 +120,7 @@ def main() -> None:
 
     dataset_file = args.cases_file or str(DEFAULT_CASES_FILE)
     cases = load_cases(dataset_file, suite="task")
+    cache_metrics_before = fetch_cache_metrics(args.base_url)
     endpoint = f"{args.base_url.rstrip('/')}/agent-chat"
     results: list[dict] = []
 
@@ -199,8 +206,16 @@ def main() -> None:
     }
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     latest_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    cache_report_path = persist_cache_run(
+        suite="task",
+        base_url=args.base_url,
+        before=cache_metrics_before,
+        after=fetch_cache_metrics(args.base_url),
+    )
     print(f"\nReport saved: {report_path}")
     print(f"Latest report: {latest_path}")
+    if cache_report_path:
+        print(f"Cache summary saved: {cache_report_path}")
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from cache_metrics import fetch_cache_metrics, persist_cache_run
 from dataset_loader import load_cases
 
 ROUTE_ORDER = ["chat", "rag", "tool", "unknown"]
@@ -13,6 +14,7 @@ LENIENT_AMBIGUOUS_THRESHOLD = 0.3
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 180
 
 DEFAULT_CASES_FILE = Path(__file__).resolve().parent / "datasets" / "route_cases.json"
+DEFAULT_REPORTS_DIR = Path(__file__).resolve().parents[2] / "data" / "eval_reports" / "route"
 
 
 def post_json(
@@ -311,7 +313,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate /agent-chat route selection accuracy.")
     parser.add_argument("--base-url", default="http://127.0.0.1:8000", help="Base URL of running backend API.")
     parser.add_argument("--session-prefix", default="route-eval", help="Session prefix.")
-    parser.add_argument("--output-dir", default="eval/reports", help="Directory for JSON reports.")
+    parser.add_argument(
+        "--output-dir",
+        default=str(DEFAULT_REPORTS_DIR),
+        help="Directory for route JSON reports. Defaults to data/eval_reports/route.",
+    )
     parser.add_argument("--output-prefix", default="route-eval", help="Report filename prefix.")
     parser.add_argument(
         "--cases-file",
@@ -349,6 +355,7 @@ def main() -> None:
         print(f"Resuming from case {args.from_case} ({len(selected_cases)} cases remaining)")
 
     endpoint = f"{args.base_url.rstrip('/')}/agent-chat"
+    cache_metrics_before = fetch_cache_metrics(args.base_url)
     planned_turns = sum(len(case.get("turns", [case])) for case in selected_cases)
     print(
         f"Running route eval: {len(selected_cases)} cases, {planned_turns} turns, "
@@ -567,8 +574,16 @@ def main() -> None:
     }
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     latest_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    cache_report_path = persist_cache_run(
+        suite="route",
+        base_url=args.base_url,
+        before=cache_metrics_before,
+        after=fetch_cache_metrics(args.base_url),
+    )
     print(f"Report saved: {report_path}")
     print(f"Latest report: {latest_path}")
+    if cache_report_path:
+        print(f"Cache summary saved: {cache_report_path}")
 
 
 if __name__ == "__main__":

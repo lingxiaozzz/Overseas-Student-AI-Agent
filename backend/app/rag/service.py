@@ -141,14 +141,30 @@ def _select_language_aware_documents(
     preferred_language: str,
     top_k: int = _RETRIEVAL_TOP_K,
 ) -> list[tuple[Document, float]]:
-    """Prefer the query language without dropping cross-language fallback coverage."""
+    """Prefer the query language and keep one highest-ranked chunk per source.
+
+    Context citations use the position of each selected document.  Returning two
+    chunks from the same file would give that file multiple context numbers, but
+    the public ``sources`` list intentionally contains each file only once.
+    Deduplicating here keeps those two mappings identical.
+    """
     preferred = [
         item for item in scored_documents if item[0].metadata.get("language", "en") == preferred_language
     ]
     fallback = [
         item for item in scored_documents if item[0].metadata.get("language", "en") != preferred_language
     ]
-    return [*preferred, *fallback][:top_k]
+    selected: list[tuple[Document, float]] = []
+    seen_sources: set[str] = set()
+    for document, score in [*preferred, *fallback]:
+        source = str(document.metadata.get("source", "unknown"))
+        if source in seen_sources:
+            continue
+        seen_sources.add(source)
+        selected.append((document, score))
+        if len(selected) == top_k:
+            break
+    return selected
 
 
 def _append_source_citations(answer: str, sources: list[str]) -> str:

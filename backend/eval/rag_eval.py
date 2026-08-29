@@ -12,10 +12,12 @@ from pathlib import Path
 from statistics import mean
 from typing import Any
 
+from cache_metrics import fetch_cache_metrics, persist_cache_run
 from dataset_loader import load_cases
 
 
 DEFAULT_DATASET = Path(__file__).resolve().parent / "datasets" / "rag_cases.json"
+DEFAULT_REPORTS_DIR = Path(__file__).resolve().parents[2] / "data" / "eval_reports" / "rag"
 
 
 def post_json(url: str, payload: dict[str, Any], *, timeout: int) -> dict[str, Any]:
@@ -78,13 +80,18 @@ def main() -> None:
     parser.add_argument("--cases-file", default=str(DEFAULT_DATASET))
     parser.add_argument("--top-k", type=int, default=3)
     parser.add_argument("--timeout", type=int, default=60)
-    parser.add_argument("--output-dir", default="eval/reports")
+    parser.add_argument(
+        "--output-dir",
+        default=str(DEFAULT_REPORTS_DIR),
+        help="Directory for RAG JSON reports. Defaults to data/eval_reports/rag.",
+    )
     parser.add_argument("--output-prefix", default="rag-eval")
     args = parser.parse_args()
     if args.top_k < 1:
         raise SystemExit("--top-k must be at least 1.")
 
     cases = load_cases(args.cases_file, suite="rag")
+    cache_metrics_before = fetch_cache_metrics(args.base_url)
     endpoint = f"{args.base_url.rstrip('/')}/rag-chat"
     results: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
@@ -130,6 +137,12 @@ def main() -> None:
     payload = json.dumps(report, indent=2)
     report_path.write_text(payload, encoding="utf-8")
     latest_path.write_text(payload, encoding="utf-8")
+    cache_report_path = persist_cache_run(
+        suite="rag",
+        base_url=args.base_url,
+        before=cache_metrics_before,
+        after=fetch_cache_metrics(args.base_url),
+    )
 
     print("\nRAG Evaluation Summary")
     print(f"- Recall@{args.top_k}: {recall_at_k:.2%}")
@@ -141,6 +154,8 @@ def main() -> None:
     print(f"- Non-empty answer rate: {answer_rate:.2%}")
     print(f"- Request errors: {len(errors)}")
     print(f"Report saved: {report_path}")
+    if cache_report_path:
+        print(f"Cache summary saved: {cache_report_path}")
 
 
 if __name__ == "__main__":
