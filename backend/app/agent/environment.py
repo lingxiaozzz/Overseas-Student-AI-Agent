@@ -5,10 +5,10 @@ from dataclasses import dataclass, field
 from threading import Lock
 from typing import Any, Literal
 
-from app.chat_service import generate_chat_response
-from app.rag_service import generate_rag_response
-from app.schemas import RetrievedContext
-from app.tool_service import generate_tool_response
+from app.agent.chat import generate_chat_response
+from app.api.schemas import RetrievedContext
+from app.rag.service import generate_rag_response
+from app.tools.service import generate_tool_response
 
 ActionType = Literal["chat", "rag", "tool"]
 

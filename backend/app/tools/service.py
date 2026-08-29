@@ -4,10 +4,10 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 
-from app.content_utils import content_to_text
-from app.llm_service import create_chat_model
-from app.prompt_utils import cache_friendly_messages
-from app.retry_service import with_retry
+from app.core.llm import create_chat_model
+from app.core.prompts import cache_friendly_messages
+from app.core.retry import with_retry
+from app.utils.content import content_to_text
 
 
 TOOL_SYSTEM_PROMPT = """You are an AI assistant for international students in Sydney.

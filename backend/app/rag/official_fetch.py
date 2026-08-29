@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 import aiohttp
 
-from app.config import settings
+from app.core.config import settings
 
 
 ALLOWED_HOST_SUFFIXES = (

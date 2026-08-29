@@ -6,13 +6,13 @@ from langchain_core.documents import Document
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from app.config import settings
-from app.content_utils import content_to_text
-from app.llm_service import MissingApiKeyError, create_chat_model
-from app.official_fetch import fetch_official_pages_for_query
-from app.prompt_utils import cache_friendly_messages
-from app.retry_service import with_retry
-from app.schemas import RetrievedContext
+from app.api.schemas import RetrievedContext
+from app.core.config import settings
+from app.core.llm import MissingApiKeyError, create_chat_model
+from app.core.prompts import cache_friendly_messages
+from app.core.retry import with_retry
+from app.rag.official_fetch import fetch_official_pages_for_query
+from app.utils.content import content_to_text
 
 
 RAG_SYSTEM_PROMPT = """You are an AI assistant for international students in Sydney.

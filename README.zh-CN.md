@@ -70,20 +70,15 @@ flowchart TD
 ```text
 backend/
   app/
-    main.py            # FastAPI 接口
-    graph_service.py   # LangGraph plan-act-reflect-evaluate 运行时
-    environment.py     # Observation-Action 环境接口
-    evaluator_service.py # 最终回答打分与 pass/fail
-    memory_service.py  # Working + Long-term + Experience
-    chat_service.py    # 直接对话
-    rag_service.py     # RAG + FAISS 检索
-    official_fetch.py  # 官方网页白名单抓取
-    mcp_official_fetch.py  # 官方 Fetch MCP
-    tool_service.py    # 内部工具（预算、清单）
-    logging_service.py # TRACE/INFO 日志
-    retry_service.py   # Gemini 重试 / 退避
-    schemas.py         # 请求 / 响应模型
-    config.py          # 配置
+    main.py            # FastAPI 应用入口
+    api/schemas.py     # 请求 / 响应模型
+    agent/             # LangGraph 运行时、环境、直接对话
+    rag/               # FAISS 检索、官方抓取、MCP 服务
+    memory/            # 工作、长期、经验记忆
+    tools/             # 内部工具（预算、清单）
+    evaluation/        # 最终回答打分
+    core/              # 配置、LLM、重试、日志、提示词
+    utils/             # 公共内容工具
   demo/
     agent_demo.py      # 演示脚本
   eval/
@@ -145,7 +140,7 @@ API Key：https://aistudio.google.com/app/apikey
 
 ```powershell
 cd backend
-python -m app.mcp_official_fetch
+python -m app.rag.mcp_official_fetch
 ```
 
 Cursor 已配置 `.cursor/mcp.json`。工具：`list_official_sources`、`fetch_official_page`。非白名单 URL 会被拒绝。
@@ -243,7 +238,7 @@ python demo/agent_demo.py --persist-experience false
 - 全局执行预算会限制跨 replan 的总步数、工具调用与运行时间；响应通过 `budget.stop_reason` 暴露停止原因
 
 ### 环境抽象
-- `environment.py` 统一 Observation–Action 接口
+- `app/agent/environment.py` 统一 Observation–Action 接口
 - 当前适配器：`student_support`（`chat` / `rag` / `tool`）
 - 逐步 reward：`last_reward` / `total_reward`
 

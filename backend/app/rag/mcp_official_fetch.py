@@ -1,14 +1,14 @@
 """MCP server: fetch allowlisted Australian official student pages.
 
 Run from the backend directory:
-    python -m app.mcp_official_fetch
+    python -m app.rag.mcp_official_fetch
 """
 
 from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 
-from app.official_fetch import (
+from app.rag.official_fetch import (
     OfficialFetchError,
     fetch_official_page,
     list_official_sources,

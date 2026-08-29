@@ -8,7 +8,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Literal
 
-from app.config import settings
+from app.core.config import settings
 
 
 MemoryLayer = Literal["working", "long_term", "experience"]

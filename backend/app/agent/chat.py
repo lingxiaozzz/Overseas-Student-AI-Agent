@@ -1,7 +1,7 @@
-from app.content_utils import content_to_text
-from app.llm_service import MissingApiKeyError, create_chat_model
-from app.prompt_utils import cache_friendly_messages
-from app.retry_service import with_retry
+from app.core.llm import MissingApiKeyError, create_chat_model
+from app.core.prompts import cache_friendly_messages
+from app.core.retry import with_retry
+from app.utils.content import content_to_text
 
 
 SYSTEM_PROMPT = """You are an AI assistant for international students in Sydney.

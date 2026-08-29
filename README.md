@@ -68,20 +68,15 @@ flowchart TD
 ```text
 backend/
   app/
-    main.py            # FastAPI endpoints
-    graph_service.py   # LangGraph plan-act-reflect-evaluate runtime
-    environment.py     # Observation-Action environment interface
-    evaluator_service.py # Final-answer scoring + pass/fail
-    memory_service.py  # Working + long-term + experience memory
-    chat_service.py    # Direct chat
-    rag_service.py     # RAG + FAISS retrieval
-    official_fetch.py  # Allowlisted official webpage fetch
-    mcp_official_fetch.py  # MCP server for official fetch
-    tool_service.py    # Internal tools (budget, checklist)
-    logging_service.py # TRACE/INFO logging
-    retry_service.py   # Gemini retry/backoff
-    schemas.py         # Request/response models
-    config.py          # Settings
+    main.py            # FastAPI application entry point
+    api/schemas.py     # Request/response models
+    agent/             # LangGraph runtime, environment, direct chat
+    rag/               # FAISS retrieval, official fetch, MCP server
+    memory/            # Working, long-term, experience memory
+    tools/             # Internal tools (budget, checklist)
+    evaluation/        # Final-answer scoring
+    core/              # Settings, LLM, retry, logging, prompts
+    utils/             # Shared content utilities
   demo/
     agent_demo.py      # Demo runner
   eval/
@@ -143,7 +138,7 @@ Policy RAG also fetches allowlisted official pages (Home Affairs / Study Austral
 
 ```powershell
 cd backend
-python -m app.mcp_official_fetch
+python -m app.rag.mcp_official_fetch
 ```
 
 Cursor is configured via `.cursor/mcp.json`. Tools: `list_official_sources`, `fetch_official_page`. Non-allowlisted URLs are rejected.
@@ -241,7 +236,7 @@ Useful headers:
 - Global execution budgets cap total steps across replans, tool calls, and elapsed runtime; response exposes `budget.stop_reason`
 
 ### Environment abstraction
-- Unified Observation-Action interface in `environment.py`
+- Unified Observation-Action interface in `app/agent/environment.py`
 - Current adapter: `student_support` (`chat` / `rag` / `tool`)
 - Step rewards exposed as `last_reward` / `total_reward`
 

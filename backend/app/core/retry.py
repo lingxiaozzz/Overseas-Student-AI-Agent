@@ -5,7 +5,7 @@ from typing import TypeVar
 
 from tenacity import AsyncRetrying, RetryCallState, retry_if_exception, stop_after_attempt, wait_exponential_jitter
 
-from app.config import settings
+from app.core.config import settings
 
 T = TypeVar("T")
 

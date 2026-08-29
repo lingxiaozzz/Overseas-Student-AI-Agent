@@ -3,14 +3,9 @@ from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request, status
 
-from app.chat_service import generate_chat_response
-from app.llm_service import MissingApiKeyError, llm_override
-from app.config import settings
-from app.graph_service import run_agent_workflow
-from app.logging_service import get_logger
-from app.memory_service import append_turn, get_chat_history_text, write_working_memory
-from app.rag_service import KnowledgeBaseNotFoundError, generate_rag_response
-from app.schemas import (
+from app.agent.chat import generate_chat_response
+from app.agent.graph import run_agent_workflow
+from app.api.schemas import (
     ActionDecisionInfo,
     AgentChatResponse,
     AgentBudget,
@@ -27,7 +22,12 @@ from app.schemas import (
     ReflectionInfo,
     ToolChatResponse,
 )
-from app.tool_service import generate_tool_response
+from app.core.config import settings
+from app.core.llm import MissingApiKeyError, llm_override
+from app.core.logging import get_logger
+from app.memory.service import append_turn, get_chat_history_text, write_working_memory
+from app.rag.service import KnowledgeBaseNotFoundError, generate_rag_response
+from app.tools.service import generate_tool_response
 
 
 app = FastAPI(title=settings.app_name)

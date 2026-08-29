@@ -1,6 +1,6 @@
 import logging
 
-from app.config import settings
+from app.core.config import settings
 
 TRACE_LEVEL_NUM = 5
 logging.addLevelName(TRACE_LEVEL_NUM, "TRACE")

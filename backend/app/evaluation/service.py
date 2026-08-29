@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from app.config import settings
-from app.llm_service import create_chat_model
-from app.prompt_utils import cache_friendly_messages
-from app.retry_service import with_retry
+from app.core.config import settings
+from app.core.llm import create_chat_model
+from app.core.prompts import cache_friendly_messages
+from app.core.retry import with_retry
 
 EVALUATOR_PROMPT = """You are a strict final-answer evaluator for an international student assistant.
 Score whether the candidate answer fully satisfies the user goal.
