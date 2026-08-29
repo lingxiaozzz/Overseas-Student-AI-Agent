@@ -88,6 +88,7 @@ backend/
   eval/
     route_eval.py      # 路由准确率评测
     task_eval.py       # 任务成功 / 步数 / 工具评测
+    rag_eval.py        # 检索 Recall@K / MRR 评测
     run_eval.py        # 统一 benchmark 入口
 data/
   knowledge_base/      # 世界知识 markdown
@@ -270,12 +271,13 @@ cd backend
 python eval/route_eval.py --base-url http://127.0.0.1:8000
 python eval/task_eval.py --base-url http://127.0.0.1:8000
 
-# 推荐：以同一个不可变 benchmark ID 运行两个评测套件
+# 推荐：以同一个不可变 benchmark ID 运行路由、任务和 RAG 三套评测
 python eval/run_eval.py --base-url http://127.0.0.1:8000 --label baseline
 
 # 运行独立、版本化的安全回归数据集
 python eval/route_eval.py --cases-file eval/datasets/route_safety_cases.json
 python eval/task_eval.py --cases-file eval/datasets/task_safety_cases.json
+python eval/rag_eval.py --cases-file eval/datasets/rag_cases.json --top-k 3
 
 # 或将两套专项数据作为同一个 benchmark 运行
 python eval/run_eval.py --label safety-v1 --route-cases-file eval/datasets/route_safety_cases.json --task-cases-file eval/datasets/task_safety_cases.json

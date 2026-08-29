@@ -86,6 +86,7 @@ backend/
   eval/
     route_eval.py      # Route accuracy evaluation
     task_eval.py       # Task success / steps / tools evaluation
+    rag_eval.py        # Retrieval Recall@K / MRR evaluation
     run_eval.py        # Unified benchmark entry point
 data/
   knowledge_base/      # World knowledge markdown
@@ -268,12 +269,13 @@ cd backend
 python eval/route_eval.py --base-url http://127.0.0.1:8000
 python eval/task_eval.py --base-url http://127.0.0.1:8000
 
-# Recommended: runs both suites under one immutable benchmark ID
+# Recommended: runs route, task, and RAG suites under one immutable benchmark ID
 python eval/run_eval.py --base-url http://127.0.0.1:8000 --label baseline
 
 # Run a focused, versioned safety regression dataset
 python eval/route_eval.py --cases-file eval/datasets/route_safety_cases.json
 python eval/task_eval.py --cases-file eval/datasets/task_safety_cases.json
+python eval/rag_eval.py --cases-file eval/datasets/rag_cases.json --top-k 3
 
 # Or run both focused datasets as a single benchmark
 python eval/run_eval.py --label safety-v1 --route-cases-file eval/datasets/route_safety_cases.json --task-cases-file eval/datasets/task_safety_cases.json

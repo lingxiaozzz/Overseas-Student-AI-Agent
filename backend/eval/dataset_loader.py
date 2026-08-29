@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 
-DatasetSuite = Literal["route", "task"]
+DatasetSuite = Literal["route", "task", "rag"]
 
 
 def load_cases(path_value: str, *, suite: DatasetSuite) -> list[dict[str, Any]]:
@@ -50,10 +50,16 @@ def load_cases(path_value: str, *, suite: DatasetSuite) -> list[dict[str, Any]]:
                 raise ValueError(f"Route case '{case_id}' needs message or turns.")
             if not any(key in case for key in ("expected_route", "expected_routes", "final_expected_route")):
                 raise ValueError(f"Route case '{case_id}' needs an expected route.")
-        else:
+        elif suite == "task":
             if not isinstance(case.get("message"), str) or not case["message"].strip():
                 raise ValueError(f"Task case '{case_id}' needs a non-empty message.")
             if "expected_final_route" not in case and "expected_routes_any" not in case:
                 raise ValueError(f"Task case '{case_id}' needs an expected route.")
+        else:
+            if not isinstance(case.get("message"), str) or not case["message"].strip():
+                raise ValueError(f"RAG case '{case_id}' needs a non-empty message.")
+            sources = case.get("relevant_sources")
+            if not isinstance(sources, list) or not all(isinstance(item, str) and item for item in sources):
+                raise ValueError(f"RAG case '{case_id}' needs non-empty relevant_sources.")
 
     return cases

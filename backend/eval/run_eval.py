@@ -39,11 +39,15 @@ def _percent(value: float | None) -> str:
 def _print_summary(summary: dict[str, Any]) -> None:
     route = summary.get("route")
     task = summary.get("task")
+    rag = summary.get("rag")
     print("\n================ Agent Evaluation ================")
     print(f"Run ID                     {summary['run_id']}")
     print(f"Route strict accuracy      {_percent(route and route['strict_accuracy'])}")
     print(f"Route lenient accuracy     {_percent(route and route['lenient_accuracy'])}")
     print(f"Task success rate          {_percent(task and task['success_rate'])}")
+    print(f"RAG Recall@K               {_percent(rag and rag['recall_at_k'])}")
+    print(f"RAG MRR                    {rag['mrr']:.3f}" if rag else "RAG MRR                    n/a")
+    print(f"RAG source coverage        {_percent(rag and rag['source_metadata_coverage'])}")
     print(f"Safety correctness         {_percent(route and route['safety_correctness'])}")
     print(f"Avg steps                  {task['avg_steps']:.2f}" if task else "Avg steps                  n/a")
     print(f"Avg tool calls             {task['avg_tool_calls']:.2f}" if task else "Avg tool calls             n/a")
@@ -52,18 +56,22 @@ def _print_summary(summary: dict[str, Any]) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run route and task evaluation as one benchmark.")
+    parser = argparse.ArgumentParser(description="Run route, task, and RAG evaluation as one benchmark.")
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
     parser.add_argument("--output-dir", default="eval/reports", help="Report root relative to backend/.")
     parser.add_argument("--label", default="", help="Optional immutable label, e.g. baseline or reranker-v1.")
     parser.add_argument("--timeout", type=int, default=180, help="Per-request route-suite timeout in seconds.")
     parser.add_argument("--route-cases-file", default="", help="Optional versioned route dataset JSON.")
     parser.add_argument("--task-cases-file", default="", help="Optional versioned task dataset JSON.")
+    parser.add_argument("--rag-cases-file", default="", help="Optional versioned RAG dataset JSON.")
+    parser.add_argument("--rag-top-k", type=int, default=3)
+    parser.add_argument("--rag-timeout", type=int, default=60)
     parser.add_argument("--skip-route", action="store_true")
     parser.add_argument("--skip-task", action="store_true")
+    parser.add_argument("--skip-rag", action="store_true")
     args = parser.parse_args()
 
-    if args.skip_route and args.skip_task:
+    if args.skip_route and args.skip_task and args.skip_rag:
         raise SystemExit("At least one suite must be enabled.")
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%SZ")
@@ -95,9 +103,25 @@ def main() -> None:
             "task_eval.py",
             [*common_args, *task_dataset_args, "--output-prefix", "task", "--session-prefix", f"{run_id}-task"],
         )
+    if not args.skip_rag:
+        rag_dataset_args = ["--cases-file", args.rag_cases_file] if args.rag_cases_file else []
+        _run_suite(
+            "rag_eval.py",
+            [
+                *common_args,
+                *rag_dataset_args,
+                "--output-prefix",
+                "rag",
+                "--top-k",
+                str(args.rag_top_k),
+                "--timeout",
+                str(args.rag_timeout),
+            ],
+        )
 
     route_report = _load_json(run_dir / "latest.json") if not args.skip_route else None
     task_report = _load_json(run_dir / "task-latest.json") if not args.skip_task else None
+    rag_report = _load_json(run_dir / "rag-latest.json") if not args.skip_rag else None
     summary: dict[str, Any] = {
         "schema_version": 1,
         "run_id": run_id,
@@ -106,8 +130,10 @@ def main() -> None:
         "base_url": args.base_url,
         "route_dataset_file": args.route_cases_file or None,
         "task_dataset_file": args.task_cases_file or None,
+        "rag_dataset_file": args.rag_cases_file or None,
         "route": None,
         "task": None,
+        "rag": None,
     }
     if route_report:
         summary["route"] = {
@@ -128,6 +154,15 @@ def main() -> None:
             "replan_rate": task_report["replan_rate"],
             "reflection_finish_rate": task_report["reflection_finish_rate"],
             "evaluation_pass_rate": task_report["evaluation_pass_rate"],
+        }
+    if rag_report:
+        summary["rag"] = {
+            "total_cases": rag_report["total_cases"],
+            "completed_cases": rag_report["completed_cases"],
+            "recall_at_k": rag_report["recall_at_k"],
+            "mrr": rag_report["mrr"],
+            "source_metadata_coverage": rag_report["source_metadata_coverage"],
+            "request_error_count": len(rag_report["request_errors"]),
         }
 
     summary_path = run_dir / "summary.json"

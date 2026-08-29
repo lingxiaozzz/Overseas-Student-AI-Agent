@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "suite": "rag",
+  "description": "Knowledge-base retrieval regression set. Relevant sources name the expected markdown documents.",
+  "cases": [
+    {
+      "id": "rag-prearrival",
+      "category": "pre-arrival",
+      "message": "What should I prepare before arriving at USYD as an international student?",
+      "relevant_sources": ["usyd_prearrival.md"]
+    },
+    {
+      "id": "rag-oshc",
+      "category": "health-cover",
+      "message": "Do international students need OSHC and what does it cover?",
+      "relevant_sources": ["oshc.md"]
+    },
+    {
+      "id": "rag-orientation",
+      "category": "orientation",
+      "message": "What should I expect during orientation week at USYD?",
+      "relevant_sources": ["orientation.md"]
+    },
+    {
+      "id": "rag-accommodation",
+      "category": "accommodation",
+      "message": "What accommodation options should a new USYD student consider?",
+      "relevant_sources": ["accommodation.md"]
+    },
+    {
+      "id": "rag-visa-compliance",
+      "category": "visa",
+      "message": "What student visa compliance responsibilities should I keep in mind?",
+      "relevant_sources": ["visa_compliance.md"]
+    }
+  ]
+}
