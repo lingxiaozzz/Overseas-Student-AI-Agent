@@ -86,11 +86,23 @@ def main() -> None:
         help="Directory for RAG JSON reports. Defaults to data/eval_reports/rag.",
     )
     parser.add_argument("--output-prefix", default="rag-eval")
+    parser.add_argument(
+        "--case-ids",
+        default="",
+        help="Comma-separated RAG case ids for a targeted run. Does not overwrite rag-latest.json.",
+    )
     args = parser.parse_args()
     if args.top_k < 1:
         raise SystemExit("--top-k must be at least 1.")
 
     cases = load_cases(args.cases_file, suite="rag")
+    selected_case_ids = [case_id.strip() for case_id in args.case_ids.split(",") if case_id.strip()]
+    if selected_case_ids:
+        available_cases = {str(case["id"]): case for case in cases}
+        missing_case_ids = [case_id for case_id in selected_case_ids if case_id not in available_cases]
+        if missing_case_ids:
+            raise SystemExit(f"Unknown RAG case id(s): {', '.join(missing_case_ids)}")
+        cases = [available_cases[case_id] for case_id in selected_case_ids]
     cache_metrics_before = fetch_cache_metrics(args.base_url)
     endpoint = f"{args.base_url.rstrip('/')}/rag-chat"
     results: list[dict[str, Any]] = []
@@ -117,6 +129,7 @@ def main() -> None:
         "generated_at_utc": timestamp,
         "base_url": args.base_url,
         "dataset_file": args.cases_file,
+        "selected_case_ids": selected_case_ids or None,
         "top_k": args.top_k,
         "total_cases": len(cases),
         "completed_cases": len(results),
@@ -133,12 +146,12 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     report_path = output_dir / f"{args.output_prefix}-{timestamp}.json"
-    latest_path = output_dir / "rag-latest.json"
+    latest_path = output_dir / ("rag-targeted-latest.json" if selected_case_ids else "rag-latest.json")
     payload = json.dumps(report, indent=2)
     report_path.write_text(payload, encoding="utf-8")
     latest_path.write_text(payload, encoding="utf-8")
     cache_report_path = persist_cache_run(
-        suite="rag",
+        suite="rag-targeted" if selected_case_ids else "rag",
         base_url=args.base_url,
         before=cache_metrics_before,
         after=fetch_cache_metrics(args.base_url),

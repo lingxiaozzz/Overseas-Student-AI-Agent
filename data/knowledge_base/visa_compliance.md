@@ -7,7 +7,7 @@ This guide summarises common compliance expectations for international students 
 - Hold a valid student visa and comply with visa conditions at all times.
 - Maintain enrolment in a registered course and meet course attendance and progress requirements.
 - Keep Overseas Student Health Cover (OSHC) for the required period.
-- Notify the university and update visa records if contact details or circumstances change.
+- Notify the university and update visa records if contact details (including a residential address) or personal circumstances change.
 - Do not rely on unverified "visa shortcuts", fake documents, or advice that bypasses official processes.
 
 ## Work rights on a student visa
