@@ -16,7 +16,8 @@ from app.schemas import RetrievedContext
 
 RAG_SYSTEM_PROMPT = """You are an AI assistant for international students in Sydney.
 Answer using the provided knowledge base context first.
-If official webpage excerpts are provided, prefer them for current policy details and cite the exact URLs.
+Each context source has a bracketed number. Cite factual claims using that number, for example [1].
+If official webpage excerpts are provided, prefer them for current policy details and cite their bracketed number.
 If the context does not contain enough information, say what is missing and give cautious general guidance.
 Always remind users to verify visa, enrolment, health cover, and legal requirements with official sources.
 Use prior conversation history when it helps maintain continuity."""
@@ -88,10 +89,10 @@ def _build_vector_store() -> FAISS:
     raise RuntimeError("Failed to build FAISS index due to an unknown embedding configuration error.")
 
 
-def _format_context(documents: list[Document]) -> str:
+def _format_context(documents: list[Document], *, start_index: int = 1) -> str:
     return "\n\n".join(
-        f"Source: {document.metadata.get('source', 'unknown')}\n{document.page_content}"
-        for document in documents
+        f"[{index}] Source: {document.metadata.get('source', 'unknown')}\n{document.page_content}"
+        for index, document in enumerate(documents, start=start_index)
     )
 
 
@@ -117,6 +118,14 @@ def _build_retrieved_contexts(
     ]
 
 
+def _append_source_citations(answer: str, sources: list[str]) -> str:
+    """Always expose the source-number mapping even if the model omits inline citations."""
+    if not sources:
+        return answer.strip()
+    source_lines = "\n".join(f"[{index}] {source}" for index, source in enumerate(sources, start=1))
+    return f"{answer.strip()}\n\nSources:\n{source_lines}".strip()
+
+
 async def generate_rag_response(
     message: str, chat_history: str = ""
 ) -> tuple[str, list[str], list[RetrievedContext]]:
@@ -126,13 +135,14 @@ async def generate_rag_response(
     vector_store = _build_vector_store()
     scored_documents = vector_store.similarity_search_with_score(message, k=3)
     retrieved_documents = [document for document, _score in scored_documents]
-    context = _format_context(retrieved_documents)
     retrieved_contexts = _build_retrieved_contexts(scored_documents)
     official_pages = await fetch_official_pages_for_query(message)
+    context = _format_context(retrieved_documents)
     official_block = ""
     if official_pages:
         official_block = "\n\nOfficial webpage excerpts:\n" + "\n\n".join(
-            f"URL: {page.url}\nTitle: {page.title}\n{page.text}" for page in official_pages
+            f"[{index}] URL: {page.url}\nTitle: {page.title}\n{page.text}"
+            for index, page in enumerate(official_pages, start=len(retrieved_contexts) + 1)
         )
         start_rank = len(retrieved_contexts) + 1
         retrieved_contexts.extend(
@@ -152,8 +162,9 @@ async def generate_rag_response(
         f"Question:\n{message}\n\nKnowledge base context:\n{context}{official_block}",
     )
     response = await with_retry(lambda: model.ainvoke(messages))
-    sources = sorted({document.metadata.get("source", "unknown") for document in retrieved_documents})
-    for page in official_pages:
-        if page.url not in sources:
-            sources.append(page.url)
-    return content_to_text(response.content), sources, retrieved_contexts
+    sources: list[str] = []
+    for context_item in retrieved_contexts:
+        if context_item.source not in sources:
+            sources.append(context_item.source)
+    answer = _append_source_citations(content_to_text(response.content), sources)
+    return answer, sources, retrieved_contexts

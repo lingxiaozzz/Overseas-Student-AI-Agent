@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -44,6 +45,13 @@ def evaluate_case(case: dict[str, Any], response: dict[str, Any], *, top_k: int)
     first_rank = next((index for index, source in enumerate(ranked_sources, start=1) if source in expected), None)
     source_metadata = set(str(source) for source in response.get("sources", []))
     answer = str(response.get("answer", "")).strip()
+    citation_indices = [int(value) for value in re.findall(r"\[(\d+)\]", answer)]
+    response_sources = [str(source) for source in response.get("sources", [])]
+    cited_sources = {
+        response_sources[index - 1]
+        for index in citation_indices
+        if 1 <= index <= len(response_sources)
+    }
 
     return {
         "id": case["id"],
@@ -55,6 +63,10 @@ def evaluate_case(case: dict[str, Any], response: dict[str, Any], *, top_k: int)
         "recall_at_k": bool(expected.intersection(retrieved_at_k)),
         "reciprocal_rank": (1.0 / first_rank) if first_rank else 0.0,
         "source_metadata_coverage": bool(expected.intersection(source_metadata)),
+        "answer_has_citations": bool(citation_indices),
+        "citation_mapping_valid": bool(citation_indices)
+        and all(1 <= index <= len(response_sources) for index in citation_indices),
+        "relevant_source_cited": bool(expected.intersection(cited_sources)),
         "non_empty_answer": bool(answer),
         "answer_preview": " ".join(answer.split())[:180],
     }
@@ -88,6 +100,9 @@ def main() -> None:
     recall_at_k = mean([float(item["recall_at_k"]) for item in results]) if results else 0.0
     mrr = mean([item["reciprocal_rank"] for item in results]) if results else 0.0
     source_coverage = mean([float(item["source_metadata_coverage"]) for item in results]) if results else 0.0
+    citation_rate = mean([float(item["answer_has_citations"]) for item in results]) if results else 0.0
+    citation_mapping_validity = mean([float(item["citation_mapping_valid"]) for item in results]) if results else 0.0
+    relevant_source_cited_rate = mean([float(item["relevant_source_cited"]) for item in results]) if results else 0.0
     answer_rate = mean([float(item["non_empty_answer"]) for item in results]) if results else 0.0
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%SZ")
     report = {
@@ -102,6 +117,9 @@ def main() -> None:
         "recall_at_k": recall_at_k,
         "mrr": mrr,
         "source_metadata_coverage": source_coverage,
+        "answer_citation_rate": citation_rate,
+        "citation_mapping_validity": citation_mapping_validity,
+        "relevant_source_cited_rate": relevant_source_cited_rate,
         "non_empty_answer_rate": answer_rate,
         "results": results,
     }
@@ -117,6 +135,9 @@ def main() -> None:
     print(f"- Recall@{args.top_k}: {recall_at_k:.2%}")
     print(f"- MRR: {mrr:.3f}")
     print(f"- Source metadata coverage: {source_coverage:.2%}")
+    print(f"- Answer citation rate: {citation_rate:.2%}")
+    print(f"- Citation mapping validity: {citation_mapping_validity:.2%}")
+    print(f"- Relevant source cited: {relevant_source_cited_rate:.2%}")
     print(f"- Non-empty answer rate: {answer_rate:.2%}")
     print(f"- Request errors: {len(errors)}")
     print(f"Report saved: {report_path}")

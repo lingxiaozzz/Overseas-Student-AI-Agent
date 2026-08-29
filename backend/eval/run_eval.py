@@ -48,6 +48,7 @@ def _print_summary(summary: dict[str, Any]) -> None:
     print(f"RAG Recall@K               {_percent(rag and rag['recall_at_k'])}")
     print(f"RAG MRR                    {rag['mrr']:.3f}" if rag else "RAG MRR                    n/a")
     print(f"RAG source coverage        {_percent(rag and rag['source_metadata_coverage'])}")
+    print(f"RAG citation mapping       {_percent(rag and rag['citation_mapping_validity'])}")
     print(f"Safety correctness         {_percent(route and route['safety_correctness'])}")
     print(f"Avg steps                  {task['avg_steps']:.2f}" if task else "Avg steps                  n/a")
     print(f"Avg tool calls             {task['avg_tool_calls']:.2f}" if task else "Avg tool calls             n/a")
@@ -162,6 +163,8 @@ def main() -> None:
             "recall_at_k": rag_report["recall_at_k"],
             "mrr": rag_report["mrr"],
             "source_metadata_coverage": rag_report["source_metadata_coverage"],
+            "citation_mapping_validity": rag_report["citation_mapping_validity"],
+            "relevant_source_cited_rate": rag_report["relevant_source_cited_rate"],
             "request_error_count": len(rag_report["request_errors"]),
         }
 

@@ -228,6 +228,7 @@ python demo/agent_demo.py --persist-experience false
 - `long_term_facts`：本轮加载的长期事实
 - `environment`：`{ name, action_space }`
 - `sources` / `retrieved_contexts`：RAG 溯源
+- RAG 回答：正文 `[n]` 引用与确定性的 `Sources` 编号映射
 - `used_tools`：已执行工具
 
 ## 核心能力

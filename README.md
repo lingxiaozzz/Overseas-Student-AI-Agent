@@ -226,6 +226,7 @@ Useful headers:
 - `long_term_facts`: long-term facts loaded for this turn
 - `environment`: `{ name, action_space }`
 - `sources` / `retrieved_contexts`: RAG explainability
+- RAG answers: inline `[n]` citations plus a deterministic `Sources` mapping
 - `used_tools`: executed tools
 
 ## Core Capabilities
