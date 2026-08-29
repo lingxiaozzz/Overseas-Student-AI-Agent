@@ -13,6 +13,7 @@ from app.rag_service import KnowledgeBaseNotFoundError, generate_rag_response
 from app.schemas import (
     ActionDecisionInfo,
     AgentChatResponse,
+    AgentBudget,
     AgentMetrics,
     AgentPlan,
     ChatRequest,
@@ -224,6 +225,25 @@ async def agent_chat(request: ChatRequest, http_request: Request) -> AgentChatRe
             memory_hits=int(result.get("memory_hits", 0)),
             last_reward=float(result.get("last_reward", 0.0)),
             total_reward=float(result.get("total_reward", 0.0)),
+        ),
+        budget=AgentBudget(
+            max_steps=int(result.get("max_agent_steps", settings.max_agent_steps)),
+            steps_remaining=max(
+                int(result.get("max_agent_steps", settings.max_agent_steps))
+                - int(result.get("steps_used", len(step_results))),
+                0,
+            ),
+            max_tool_calls=int(result.get("max_tool_calls", settings.max_tool_calls)),
+            tool_calls_remaining=max(
+                int(result.get("max_tool_calls", settings.max_tool_calls))
+                - int(result.get("tool_calls", 0)),
+                0,
+            ),
+            max_runtime_seconds=float(
+                result.get("max_agent_runtime_seconds", settings.max_agent_runtime_seconds)
+            ),
+            elapsed_ms=int(result.get("elapsed_ms", 0)),
+            stop_reason=result.get("budget_stop_reason") or None,
         ),
         memory_lessons=list(result.get("memory_lessons", [])),
         memory_reads=[MemoryEvent(**item) for item in memory_reads],

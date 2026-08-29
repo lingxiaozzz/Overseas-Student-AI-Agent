@@ -119,6 +119,9 @@ RETRY_INITIAL_SECONDS=1.0
 RETRY_MAX_SECONDS=8.0
 LOG_LEVEL=INFO
 MAX_PLAN_STEPS=4
+MAX_AGENT_STEPS=6
+MAX_TOOL_CALLS=3
+MAX_AGENT_RUNTIME_SECONDS=90
 EXPERIENCE_MEMORY_MAX_ITEMS=200
 EXPERIENCE_MEMORY_TOP_K=3
 EXPERIENCE_MEMORY_MIN_SCORE=0.2
@@ -217,6 +220,7 @@ Useful headers:
 - `reflection`: LLM judge result (`continue/replan/finish`, lesson, `goal_achieved`)
 - `evaluation`: final-answer score/pass, feedback, and whether replan was triggered
 - `metrics`: steps, tool calls, replan flag, memory hits, rewards
+- `budget`: global step/tool/runtime limits, remaining capacity, and any stop reason
 - `memory_lessons`: retrieved experience lessons
 - `memory_reads` / `memory_writes`: Working / Long-term / Experience access trace
 - `long_term_facts`: long-term facts loaded for this turn
@@ -231,6 +235,7 @@ Useful headers:
 - Planner emits soft subgoal hints (not a hard-locked execution queue)
 - Each `act` step observes the environment, then chooses the next Action (`chat`/`rag`/`tool` + content)
 - Cap with `MAX_PLAN_STEPS`; response exposes `last_observation` and `last_action_decision`
+- Global execution budgets cap total steps across replans, tool calls, and elapsed runtime; response exposes `budget.stop_reason`
 
 ### Environment abstraction
 - Unified Observation-Action interface in `environment.py`

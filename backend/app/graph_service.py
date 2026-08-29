@@ -1,4 +1,6 @@
+import asyncio
 from functools import lru_cache
+from time import monotonic
 from typing import Any, Literal, TypedDict
 
 from langgraph.graph import END, StateGraph
@@ -186,6 +188,12 @@ class AgentState(TypedDict, total=False):
     subgoal_hints: list[str]
     current_step: int
     max_steps: int
+    max_agent_steps: int
+    max_tool_calls: int
+    max_agent_runtime_seconds: float
+    started_at_monotonic: float
+    elapsed_ms: int
+    budget_stop_reason: str
     step_results: list[StepRecord]
     route: Route
     router_reason: str
@@ -436,6 +444,28 @@ def _step_budget_remaining(state: AgentState) -> int:
         int(state.get("max_steps", settings.max_plan_steps)) - int(state.get("current_step", 0)),
         0,
     )
+
+
+def _elapsed_ms(state: AgentState) -> int:
+    started_at = float(state.get("started_at_monotonic", monotonic()))
+    return max(int((monotonic() - started_at) * 1000), 0)
+
+
+def _runtime_seconds_remaining(state: AgentState) -> float:
+    budget = float(state.get("max_agent_runtime_seconds", settings.max_agent_runtime_seconds))
+    return budget - (_elapsed_ms(state) / 1000)
+
+
+def _execution_budget_stop_reason(state: AgentState) -> str:
+    if state.get("budget_stop_reason"):
+        return str(state["budget_stop_reason"])
+    if _runtime_seconds_remaining(state) <= 0:
+        return "runtime_budget_exhausted"
+    if int(state.get("steps_used", 0)) >= int(
+        state.get("max_agent_steps", settings.max_agent_steps)
+    ):
+        return "step_budget_exhausted"
+    return ""
 
 
 async def _llm_route(message: str, chat_history: str) -> RouterDecision:
@@ -734,6 +764,20 @@ async def _act_node(state: AgentState) -> AgentState:
     env = get_or_create_env(trace_id, environment_name)
     observation = env.observe()
     observation_payload = _observation_to_dict(observation)
+    budget_stop_reason = _execution_budget_stop_reason(state)
+
+    if budget_stop_reason:
+        logger.warning(f"trace_id={trace_id} act_skip={budget_stop_reason}")
+        return {
+            "route": state.get("route", "chat"),
+            "router_reason": f"Agent execution stopped: {budget_stop_reason}.",
+            "pending_action_content": "",
+            "action_decision_source": "rule_fallback",
+            "last_observation": observation_payload,
+            "action_space": observation.available_actions,
+            "budget_stop_reason": budget_stop_reason,
+            "elapsed_ms": _elapsed_ms(state),
+        }
 
     if current_step >= max_steps:
         logger.trace(f"trace_id={trace_id} act_skip=max_steps current_step={current_step}")
@@ -805,6 +849,22 @@ async def _act_node(state: AgentState) -> AgentState:
         decision, source = await _fallback_next_action(state, observation, source="hint_fallback")
         logger.warning(f"trace_id={trace_id} act_fallback={source} reason=llm_actor_unavailable")
 
+    if (
+        decision.action_type == "tool"
+        and int(state.get("tool_calls", 0)) >= int(state.get("max_tool_calls", settings.max_tool_calls))
+    ):
+        logger.warning(f"trace_id={trace_id} act_skip=tool_budget_exhausted")
+        return {
+            "route": decision.action_type,
+            "router_reason": "Agent execution stopped: tool_budget_exhausted.",
+            "pending_action_content": "",
+            "action_decision_source": "rule_fallback",
+            "last_observation": observation_payload,
+            "action_space": observation.available_actions,
+            "budget_stop_reason": "tool_budget_exhausted",
+            "elapsed_ms": _elapsed_ms(state),
+        }
+
     logger.trace(
         f"trace_id={trace_id} act_step={current_step + 1} route={decision.action_type} "
         f"source={source} content={_preview(decision.content, 80)}"
@@ -828,13 +888,48 @@ async def _execute_node(state: AgentState) -> AgentState:
     max_steps = int(state.get("max_steps", settings.max_plan_steps))
     action_content = (state.get("pending_action_content") or "").strip()
 
-    if current_step >= max_steps or not action_content:
-        return {"last_observation": state.get("last_observation", {})}
+    budget_stop_reason = _execution_budget_stop_reason(state)
+    if budget_stop_reason or current_step >= max_steps or not action_content:
+        return {
+            "last_observation": state.get("last_observation", {}),
+            "budget_stop_reason": budget_stop_reason,
+            "elapsed_ms": _elapsed_ms(state),
+        }
+
+    if route == "tool" and int(state.get("tool_calls", 0)) >= int(
+        state.get("max_tool_calls", settings.max_tool_calls)
+    ):
+        return {
+            "last_observation": state.get("last_observation", {}),
+            "budget_stop_reason": "tool_budget_exhausted",
+            "elapsed_ms": _elapsed_ms(state),
+        }
 
     env = get_or_create_env(trace_id, environment_name)
-    step_result = await env.step(
-        Action(type=route, content=action_content, reason=router_reason)
-    )
+    try:
+        remaining_tool_calls = max(
+            int(state.get("max_tool_calls", settings.max_tool_calls)) - int(state.get("tool_calls", 0)),
+            0,
+        )
+        step_result = await asyncio.wait_for(
+            env.step(
+                Action(
+                    type=route,
+                    content=action_content,
+                    reason=router_reason,
+                    tool_call_limit=remaining_tool_calls if route == "tool" else None,
+                )
+            ),
+            timeout=max(_runtime_seconds_remaining(state), 0.001),
+        )
+    except TimeoutError:
+        logger.warning(f"trace_id={trace_id} execute_timeout=runtime_budget_exhausted")
+        return {
+            "last_observation": state.get("last_observation", {}),
+            "pending_action_content": "",
+            "budget_stop_reason": "runtime_budget_exhausted",
+            "elapsed_ms": _elapsed_ms(state),
+        }
     info = step_result.info
     answer = str(info.get("answer", ""))
     sources = list(info.get("sources", []))
@@ -868,7 +963,7 @@ async def _execute_node(state: AgentState) -> AgentState:
     total_reward = float(state.get("total_reward", 0.0)) + reward
     logger.trace(
         f"trace_id={trace_id} execute_step={steps_used} env={environment_name} "
-        f"action={route} reward={reward:.2f} tools={used_tools}"
+        f"action={route} reward={reward:.2f} tools={used_tools} elapsed_ms={_elapsed_ms(state)}"
     )
     return {
         "step_results": step_results,
@@ -885,6 +980,7 @@ async def _execute_node(state: AgentState) -> AgentState:
         "environment_name": environment_name,
         "last_observation": _observation_to_dict(step_result.observation),
         "pending_action_content": "",
+        "elapsed_ms": _elapsed_ms(state),
     }
 
 
@@ -900,6 +996,15 @@ def _rule_reflect(state: AgentState) -> ReflectionDecision:
     budget_left = _step_budget_remaining(state)
     total_steps_used = int(state.get("steps_used", current_step))
 
+    if _execution_budget_stop_reason(state):
+        return ReflectionDecision(
+            done=True,
+            next_action="finish",
+            progress=1.0,
+            goal_achieved=bool(last_answer.strip()),
+            missing_info=str(state.get("budget_stop_reason", "")),
+            lesson="Execution stopped by an agent budget; return the completed work without another action.",
+        )
     if current_step >= max_steps:
         return ReflectionDecision(
             done=True,
@@ -1054,7 +1159,12 @@ def _apply_reflect_guards(state: AgentState, decision: ReflectionDecision) -> Re
     done = decision.done
     progress = _clamp_progress(decision.progress)
 
-    if current_step >= max_steps:
+    budget_stop_reason = _execution_budget_stop_reason(state)
+    if budget_stop_reason:
+        next_action = "finish"
+        done = True
+        progress = 1.0
+    elif current_step >= max_steps:
         next_action = "finish"
         done = True
         progress = 1.0
@@ -1200,6 +1310,7 @@ async def _finalize_node(state: AgentState) -> AgentState:
     replanned = bool(state.get("replanned", False))
     environment_name = state.get("environment_name", "student_support")
     trace_id = state.get("trace_id", "n/a")
+    elapsed_ms = _elapsed_ms(state)
     clear_env(trace_id, environment_name)
 
     memory_writes: list[dict] = list(state.get("memory_writes", []))
@@ -1285,6 +1396,7 @@ async def _finalize_node(state: AgentState) -> AgentState:
             "evaluation_feedback": state.get("evaluation_feedback", "No evaluation available."),
             "evaluation_source": state.get("evaluation_source", "rule_fallback"),
             "evaluation_triggered_replan": bool(state.get("evaluation_triggered_replan", False)),
+            "elapsed_ms": elapsed_ms,
         }
 
     if len(step_results) == 1:
@@ -1370,6 +1482,7 @@ async def _finalize_node(state: AgentState) -> AgentState:
         "evaluation_feedback": state.get("evaluation_feedback", "No evaluation available."),
         "evaluation_source": state.get("evaluation_source", "rule_fallback"),
         "evaluation_triggered_replan": bool(state.get("evaluation_triggered_replan", False)),
+        "elapsed_ms": elapsed_ms,
     }
 
 
@@ -1447,6 +1560,8 @@ async def _evaluate_node(state: AgentState) -> AgentState:
 
 
 def _after_evaluate(state: AgentState) -> Literal["finalize", "replan"]:
+    if _execution_budget_stop_reason(state):
+        return "finalize"
     if state.get("evaluation_next_action") == "replan":
         return "replan"
     return "finalize"
@@ -1505,6 +1620,12 @@ async def run_agent_workflow(
             "session_id": session_id,
             "trace_id": trace_id,
             "max_steps": settings.max_plan_steps,
+            "max_agent_steps": settings.max_agent_steps,
+            "max_tool_calls": settings.max_tool_calls,
+            "max_agent_runtime_seconds": settings.max_agent_runtime_seconds,
+            "started_at_monotonic": monotonic(),
+            "elapsed_ms": 0,
+            "budget_stop_reason": "",
             "step_results": [],
             "current_step": 0,
             "replanned": False,

@@ -36,6 +36,7 @@ class Action:
     type: ActionType
     content: str
     reason: str = ""
+    tool_call_limit: int | None = None
 
 
 @dataclass
@@ -134,6 +135,7 @@ class StudentSupportEnvironment(BaseEnvironment):
             answer, used_tools = await generate_tool_response(
                 action.content,
                 chat_history=self._chat_history,
+                max_tool_calls=action.tool_call_limit,
             )
         else:
             answer = await generate_chat_response(

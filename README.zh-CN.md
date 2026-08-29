@@ -121,6 +121,9 @@ RETRY_INITIAL_SECONDS=1.0
 RETRY_MAX_SECONDS=8.0
 LOG_LEVEL=INFO
 MAX_PLAN_STEPS=4
+MAX_AGENT_STEPS=6
+MAX_TOOL_CALLS=3
+MAX_AGENT_RUNTIME_SECONDS=90
 EXPERIENCE_MEMORY_MAX_ITEMS=200
 EXPERIENCE_MEMORY_TOP_K=3
 EXPERIENCE_MEMORY_MIN_SCORE=0.2
@@ -219,6 +222,7 @@ python demo/agent_demo.py --persist-experience false
 - `reflection`：LLM 判定（`continue/replan/finish`、lesson、`goal_achieved`）
 - `evaluation`：最终回答分数 / 是否通过、反馈、是否触发 replan
 - `metrics`：步数、工具调用、replan 标记、记忆命中、reward
+- `budget`：全局步数 / 工具 / 运行时间上限、剩余额度与停止原因
 - `memory_lessons`：检索到的经验策略
 - `memory_reads` / `memory_writes`：三层记忆访问轨迹
 - `long_term_facts`：本轮加载的长期事实
@@ -233,6 +237,7 @@ python demo/agent_demo.py --persist-experience false
 - Planner 产出软性提示（非硬锁定执行队列）
 - 每步 `act` 先观察环境，再选择 Action（`chat` / `rag` / `tool` + content）
 - 受 `MAX_PLAN_STEPS` 约束；响应暴露 `last_observation` 与 `last_action_decision`
+- 全局执行预算会限制跨 replan 的总步数、工具调用与运行时间；响应通过 `budget.stop_reason` 暴露停止原因
 
 ### 环境抽象
 - `environment.py` 统一 Observation–Action 接口

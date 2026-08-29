@@ -85,6 +85,16 @@ class AgentMetrics(BaseModel):
     total_reward: float = 0.0
 
 
+class AgentBudget(BaseModel):
+    max_steps: int
+    steps_remaining: int
+    max_tool_calls: int
+    tool_calls_remaining: int
+    max_runtime_seconds: float
+    elapsed_ms: int
+    stop_reason: str | None = None
+
+
 class EnvironmentInfo(BaseModel):
     name: str
     action_space: list[str]
@@ -133,6 +143,7 @@ class AgentChatResponse(RagChatResponse):
     reflection: ReflectionInfo
     evaluation: EvaluationInfo
     metrics: AgentMetrics
+    budget: AgentBudget
     memory_lessons: list[str] = Field(default_factory=list)
     memory_reads: list[MemoryEvent] = Field(default_factory=list)
     memory_writes: list[MemoryEvent] = Field(default_factory=list)

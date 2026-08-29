@@ -142,7 +142,11 @@ def _run_tool_calls(tool_calls: list[object]) -> tuple[list[str], list[ToolMessa
     return used_tools, tool_messages
 
 
-async def generate_tool_response(message: str, chat_history: str = "") -> tuple[str, list[str]]:
+async def generate_tool_response(
+    message: str,
+    chat_history: str = "",
+    max_tool_calls: int | None = None,
+) -> tuple[str, list[str]]:
     base_model = _create_tool_model()
     soft_model = base_model.bind_tools(TOOLS)
     forced_model = base_model.bind_tools(TOOLS, tool_choice="any")
@@ -166,6 +170,9 @@ async def generate_tool_response(message: str, chat_history: str = "") -> tuple[
     if not tool_calls:
         tool_calls = [_heuristic_tool_call(message)]
         first_response = AIMessage(content="", tool_calls=tool_calls)
+
+    if max_tool_calls is not None:
+        tool_calls = tool_calls[: max(0, max_tool_calls)]
 
     used_tools, tool_messages = _run_tool_calls(tool_calls)
     if not used_tools:
