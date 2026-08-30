@@ -190,12 +190,12 @@ Web Chat MVP：http://127.0.0.1:8000/
 Copy-Item .env.example .env
 # 在 .env 中填写 GOOGLE_API_KEY 和 DEEPSEEK_API_KEY。
 docker build -t overseas-student-agent .
-docker run --rm -p 8000:8000 --env-file .env overseas-student-agent
+docker run --rm -p 8000:8000 --env-file .env -v "${PWD}/data:/app/runtime-data" overseas-student-agent
 ```
 
 打开 `http://127.0.0.1:8000/`，并确认 `http://127.0.0.1:8000/health` 返回 `{"status":"ok"}`。
 
-部署到 Render / Railway 一类支持 Docker 的平台时：连接仓库、选择根目录 `Dockerfile`，并把 `GOOGLE_API_KEY`、`DEEPSEEK_API_KEY`（以及 `.env.example` 中的可选变量）配置为平台 Secret。镜像已自动读取 `PORT`，无需另填启动命令。如需在重新部署后保留长期记忆、运行日志和反馈数据，请将持久化磁盘挂载到 `/app/data`；否则这些运行时数据会按预期丢失。
+部署到 Render / Railway 一类支持 Docker 的平台时：连接仓库、选择根目录 `Dockerfile`，并把 `GOOGLE_API_KEY`、`DEEPSEEK_API_KEY`（以及 `.env.example` 中的可选变量）配置为平台 Secret。镜像已自动读取 `PORT`，无需另填启动命令。如需在重新部署后保留长期记忆、运行日志和反馈数据，请将持久化磁盘挂载到 `/app/runtime-data`；否则这些运行时数据会按预期丢失。知识库仍独立打包在 `/app/data/knowledge_base`，不会被数据盘遮挡。
 
 ## 60 秒演示
 

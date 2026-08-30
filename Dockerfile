@@ -2,7 +2,8 @@ FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    RUNTIME_DATA_PATH=/app/runtime-data
 
 WORKDIR /app/backend
 
@@ -11,6 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend /app/backend
 COPY data/knowledge_base /app/data/knowledge_base
+RUN mkdir -p /app/runtime-data
 
 EXPOSE 8000
 

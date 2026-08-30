@@ -73,10 +73,13 @@ class Settings:
     official_fetch_max_chars: int = int(os.getenv("OFFICIAL_FETCH_MAX_CHARS", "4000"))
     official_fetch_max_pages: int = int(os.getenv("OFFICIAL_FETCH_MAX_PAGES", "2"))
     knowledge_base_path: Path = PROJECT_ROOT / "data" / "knowledge_base"
-    agent_run_log_path: Path = PROJECT_ROOT / "data" / "observability" / "agent_runs.jsonl"
-    feedback_log_path: Path = PROJECT_ROOT / "data" / "observability" / "feedback.jsonl"
-    experience_memory_path: Path = PROJECT_ROOT / "data" / "memory" / "experiences.json"
-    long_term_memory_path: Path = PROJECT_ROOT / "data" / "memory" / "long_term.json"
+    # Keep mutable production data separate from the versioned knowledge base.
+    # A platform disk can mount here without hiding data/knowledge_base in the image.
+    runtime_data_path: Path = Path(os.getenv("RUNTIME_DATA_PATH", str(PROJECT_ROOT / "data")))
+    agent_run_log_path: Path = runtime_data_path / "observability" / "agent_runs.jsonl"
+    feedback_log_path: Path = runtime_data_path / "observability" / "feedback.jsonl"
+    experience_memory_path: Path = runtime_data_path / "memory" / "experiences.json"
+    long_term_memory_path: Path = runtime_data_path / "memory" / "long_term.json"
 
 
 settings = Settings()
