@@ -1,0 +1,64 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f5f7fb;
+  color: #14233b;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; }
+button, textarea { font: inherit; }
+
+.app-shell { width: min(920px, calc(100% - 32px)); margin: 0 auto; padding: 48px 0 30px; }
+.topbar { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; margin-bottom: 30px; }
+.eyebrow { margin: 0 0 8px; color: #5969a8; font-size: .72rem; font-weight: 800; letter-spacing: .1em; }
+h1 { margin: 0; font-size: clamp(1.8rem, 5vw, 2.6rem); letter-spacing: -.04em; }
+.subtitle { margin: 10px 0 0; color: #61708a; max-width: 610px; }
+
+.secondary-button, .chip { border: 1px solid #d5dced; background: white; color: #31436c; cursor: pointer; border-radius: 10px; }
+.secondary-button { padding: 10px 14px; white-space: nowrap; }
+.secondary-button:hover, .chip:hover { border-color: #7289db; color: #243c9e; }
+
+.chat-log { min-height: 380px; display: grid; gap: 16px; align-content: start; }
+.message { width: min(780px, 92%); padding: 18px 20px; border-radius: 16px; box-shadow: 0 8px 22px rgb(28 49 97 / 6%); }
+.assistant-message { background: white; border: 1px solid #e3e8f3; justify-self: start; }
+.user-message { background: #243c9e; color: white; justify-self: end; }
+.message-label { margin: 0 0 8px; font-size: .75rem; font-weight: 750; color: #6d7cab; }
+.user-message .message-label { color: #d8e0ff; }
+.message-text { line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.meta-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.pill { border-radius: 999px; padding: 5px 9px; background: #eef2ff; color: #344d9f; font-size: .76rem; font-weight: 700; }
+.source-list { margin: 14px 0 0; padding: 12px; border-radius: 10px; background: #f8faff; color: #52607a; font-size: .86rem; }
+.source-list strong { color: #2e3e67; }
+.source-list ul { margin: 6px 0 0; padding-left: 18px; }
+details { margin-top: 14px; border-top: 1px solid #e8ecf4; padding-top: 12px; color: #4f5e78; font-size: .84rem; }
+summary { cursor: pointer; color: #344d9f; font-weight: 700; }
+.detail-list { display: grid; gap: 8px; margin: 12px 0 0; }
+.detail-list div { display: grid; grid-template-columns: 120px 1fr; gap: 10px; }
+.detail-list dt { color: #71809a; }
+.detail-list dd { margin: 0; overflow-wrap: anywhere; }
+
+.suggestions { margin: 28px 0 14px; }
+.suggestions p { margin: 0 0 9px; color: #687792; font-size: .83rem; font-weight: 700; }
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { padding: 8px 11px; font-size: .84rem; }
+.composer { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; padding: 10px; background: white; border: 1px solid #dce3f0; border-radius: 16px; box-shadow: 0 8px 24px rgb(28 49 97 / 7%); }
+textarea { width: 100%; resize: vertical; border: 0; outline: 0; color: #152640; line-height: 1.5; padding: 8px; }
+.send-button { border: 0; border-radius: 10px; cursor: pointer; background: #243c9e; color: white; padding: 11px 18px; font-weight: 750; }
+.send-button:disabled { cursor: wait; opacity: .65; }
+.privacy-note { color: #78859a; font-size: .76rem; text-align: center; margin: 13px 0 0; }
+.error-message { border-color: #fecaca; background: #fff7f7; color: #9d1d25; }
+.loading { display: inline-flex; align-items: center; gap: 8px; color: #667693; font-size: .88rem; }
+.loading::before { content: ""; width: 12px; height: 12px; border: 2px solid #c8d2eb; border-top-color: #3552b5; border-radius: 50%; animation: spin .8s linear infinite; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (max-width: 620px) {
+  .app-shell { width: min(100% - 24px, 920px); padding-top: 24px; }
+  .topbar { display: block; }
+  .secondary-button { margin-top: 16px; }
+  .composer { grid-template-columns: 1fr; }
+  .send-button { width: 100%; }
+  .message { width: 100%; }
+  .detail-list div { grid-template-columns: 1fr; gap: 2px; }
+}

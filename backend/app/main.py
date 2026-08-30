@@ -1,7 +1,10 @@
 from time import perf_counter
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.agent.chat import generate_chat_response
 from app.agent.graph import run_agent_workflow
@@ -33,6 +36,8 @@ from app.tools.service import generate_tool_response
 
 app = FastAPI(title=settings.app_name)
 logger = get_logger(__name__)
+WEB_DIR = Path(__file__).resolve().parent / "web"
+app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
 
 def _trace_id_from_request(request: Request) -> str:
@@ -47,6 +52,12 @@ def _persist_experience_from_request(request: Request) -> bool:
     if raw is None:
         return True
     return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+@app.get("/", include_in_schema=False)
+async def web_chat() -> FileResponse:
+    """Serve the lightweight product-facing chat MVP."""
+    return FileResponse(WEB_DIR / "index.html")
 
 
 @app.get("/health")

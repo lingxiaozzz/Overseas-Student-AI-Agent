@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="面向悉尼大学国际学生的行前准备、政策咨询与生活预算助手。" />
+    <title>留学生咨询助手</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">USYD 国际学生支持</p>
+          <h1>留学生咨询助手</h1>
+          <p class="subtitle">为行前准备、学习生活与每周预算提供有来源依据的建议。</p>
+        </div>
+        <button id="new-chat" class="secondary-button" type="button">新建对话</button>
+      </header>
+
+      <section id="chat-log" class="chat-log" aria-live="polite">
+        <article class="message assistant-message">
+          <p class="message-label">留学生咨询助手</p>
+          <div class="message-text">你好！我可以协助你处理悉尼大学行前准备、住宿、OSHC、签证合规与每周生活预算。签证和政策相关问题请始终以学校与政府官方信息为准。</div>
+        </article>
+      </section>
+
+      <section class="suggestions" aria-label="Example questions">
+        <p>试试这样问</p>
+        <div class="chip-row">
+          <button class="chip" type="button" data-message="我到悉尼大学前需要准备什么？">行前准备</button>
+          <button class="chip" type="button" data-message="悉尼大学附近住宿要怎么选？">住宿选择</button>
+          <button class="chip" type="button" data-message="如果房租是每周 500 澳元，帮我估算每周生活预算。">每周预算</button>
+          <button class="chip" type="button" data-message="我到悉尼大学前要准备什么？如果房租每周 450 澳元，也请估算生活预算。">多意图示例</button>
+        </div>
+      </section>
+
+      <form id="chat-form" class="composer">
+        <label class="sr-only" for="message-input">你的问题</label>
+        <textarea id="message-input" rows="2" maxlength="2000" placeholder="输入关于行前准备、住宿、OSHC 或每周预算的问题…" required></textarea>
+        <button id="send-button" class="send-button" type="submit">发送</button>
+      </form>
+      <p class="privacy-note">本原型不能替代悉尼大学或澳大利亚政府的官方建议。</p>
+    </main>
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

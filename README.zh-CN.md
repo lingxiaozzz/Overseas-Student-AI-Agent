@@ -89,6 +89,7 @@ backend/
     memory/            # 工作、长期、经验记忆
     tools/             # 内部工具（预算、清单）
     evaluation/        # 最终回答打分
+    web/               # 无前端构建依赖的产品化聊天 MVP
     core/              # 配置、LLM、重试、日志、提示词
     utils/             # 公共内容工具
   demo/
@@ -166,6 +167,10 @@ python -m uvicorn app.main:app --reload
 ```
 
 接口文档：http://127.0.0.1:8000/docs
+
+Web Chat MVP：http://127.0.0.1:8000/
+
+网页直接调用 `/agent-chat`，展示最终回答、检索来源、工具使用情况和可折叠的 Agent 执行轨迹；不需要额外前端构建或前端服务。
 
 主接口：`POST /agent-chat`
 

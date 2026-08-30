@@ -87,6 +87,7 @@ backend/
     memory/            # Working, long-term, experience memory
     tools/             # Internal tools (budget, checklist)
     evaluation/        # Final-answer scoring
+    web/               # Dependency-free product-facing chat MVP
     core/              # Settings, LLM, retry, logging, prompts
     utils/             # Shared content utilities
   demo/
@@ -164,6 +165,10 @@ python -m uvicorn app.main:app --reload
 ```
 
 Docs: http://127.0.0.1:8000/docs
+
+Web Chat MVP: http://127.0.0.1:8000/
+
+The web client calls `/agent-chat` directly and shows the final answer, retrieved sources, tool usage, and a collapsible Agent execution trace. It has no separate frontend build or server.
 
 Main endpoint: `POST /agent-chat`
 
