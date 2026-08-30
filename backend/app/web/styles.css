@@ -34,6 +34,10 @@ h1 { margin: 0; font-size: clamp(1.8rem, 5vw, 2.6rem); letter-spacing: -.04em; }
 .source-list ul { margin: 6px 0 0; padding-left: 18px; }
 details { margin-top: 14px; border-top: 1px solid #e8ecf4; padding-top: 12px; color: #4f5e78; font-size: .84rem; }
 summary { cursor: pointer; color: #344d9f; font-weight: 700; }
+.feedback { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; color: #66758e; font-size: .82rem; }
+.feedback button { border: 1px solid #d5dced; border-radius: 999px; background: white; color: #344d9f; cursor: pointer; padding: 5px 10px; font-size: .8rem; }
+.feedback button:hover:not(:disabled) { border-color: #7289db; background: #f2f5ff; }
+.feedback button:disabled { cursor: wait; opacity: .65; }
 .detail-list { display: grid; gap: 8px; margin: 12px 0 0; }
 .detail-list div { display: grid; grid-template-columns: 120px 1fr; gap: 10px; }
 .detail-list dt { color: #71809a; }

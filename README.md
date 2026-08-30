@@ -282,6 +282,8 @@ Useful headers:
 - Structured logs with `trace_id`
 - Set `LOG_LEVEL=TRACE` for routing/planning/reflection traces
 - DeepSeek prompt-cache usage is exposed at `GET /metrics/llm-cache`; each eval run persists one cache summary under `data/eval_reports/cache/`
+- Each `/agent-chat` turn appends a privacy-conscious event to `data/observability/agent_runs.jsonl`: route, steps, tools, latency, evaluation, and per-request cache delta—never the prompt or answer body
+- The web UI provides helpful / not-helpful feedback per answer. Feedback is stored in `data/observability/feedback.jsonl` and linked to the run by `event_id`
 
 ### Reliability
 - Exponential backoff retries for transient model/API errors

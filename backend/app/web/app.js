@@ -79,6 +79,47 @@ function addAssistantResponse(payload) {
   });
   details.append(summary, data);
   message.append(details);
+
+  if (payload.event_id) {
+    addFeedbackControls(message, payload.event_id);
+  }
+}
+
+function addFeedbackControls(message, eventId) {
+  const feedback = document.createElement("div");
+  feedback.className = "feedback";
+  const prompt = document.createElement("span");
+  prompt.textContent = "这条回答有帮助吗？";
+  const helpful = document.createElement("button");
+  helpful.type = "button";
+  helpful.textContent = "有帮助";
+  const notHelpful = document.createElement("button");
+  notHelpful.type = "button";
+  notHelpful.textContent = "没帮助";
+
+  const submit = async (rating) => {
+    helpful.disabled = true;
+    notHelpful.disabled = true;
+    try {
+      const response = await fetch("/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event_id: eventId, rating }),
+      });
+      if (!response.ok) throw new Error("反馈保存失败");
+      prompt.textContent = "感谢你的反馈。";
+      helpful.remove();
+      notHelpful.remove();
+    } catch (_) {
+      prompt.textContent = "反馈暂未保存，请稍后重试。";
+      helpful.disabled = false;
+      notHelpful.disabled = false;
+    }
+  };
+  helpful.addEventListener("click", () => submit("helpful"));
+  notHelpful.addEventListener("click", () => submit("not_helpful"));
+  feedback.append(prompt, helpful, notHelpful);
+  message.append(feedback);
 }
 
 function scrollToLatest() {

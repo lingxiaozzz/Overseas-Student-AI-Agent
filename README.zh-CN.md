@@ -284,6 +284,8 @@ python demo/agent_demo.py --persist-experience false
 - 结构化日志带 `trace_id`
 - `LOG_LEVEL=TRACE` 可查看路由 / 规划 / 反思细节
 - `GET /metrics/llm-cache` 暴露 DeepSeek prompt-cache 用量；每次评测会在 `data/eval_reports/cache/` 生成一份缓存汇总
+- 每次 `/agent-chat` 会在 `data/observability/agent_runs.jsonl` 记录匿名运行事件：路由、步骤、工具、耗时、评估结果与本次缓存增量；不记录问题或回答正文
+- 网页回答下方提供“有帮助 / 没帮助”反馈，写入 `data/observability/feedback.jsonl`，并通过 `event_id` 关联对应运行
 
 ### 可靠性
 - 模型 / API 瞬时异常采用指数退避重试

@@ -34,6 +34,15 @@ class ChatResponse(BaseModel):
     answer: str
 
 
+class FeedbackRequest(BaseModel):
+    event_id: str = Field(..., min_length=1, max_length=80)
+    rating: Literal["helpful", "not_helpful"]
+
+
+class FeedbackResponse(BaseModel):
+    accepted: bool = True
+
+
 class RetrievedContext(BaseModel):
     rank: int
     source: str
@@ -135,6 +144,7 @@ class EvaluationInfo(BaseModel):
 
 
 class AgentChatResponse(RagChatResponse):
+    event_id: str
     route: Route
     router_reason: str
     used_tools: list[str]

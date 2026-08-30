@@ -18,6 +18,8 @@ from app.api.schemas import (
     ChatResponse,
     EnvironmentInfo,
     EvaluationInfo,
+    FeedbackRequest,
+    FeedbackResponse,
     MemoryEvent,
     ObservationInfo,
     PlanStepResult,
@@ -29,6 +31,7 @@ from app.core.config import settings
 from app.core.cache_metrics import cache_metrics
 from app.core.llm import MissingApiKeyError, llm_override
 from app.core.logging import get_logger
+from app.core.observability import append_agent_run, append_feedback, cache_delta, session_fingerprint
 from app.memory.service import append_turn, get_chat_history_text, write_working_memory
 from app.rag.service import KnowledgeBaseNotFoundError, generate_rag_response
 from app.tools.service import generate_tool_response
@@ -69,6 +72,14 @@ async def health_check() -> dict[str, str]:
 async def llm_cache_metrics() -> dict[str, int | float | str]:
     """Return process-lifetime DeepSeek cache usage without exposing prompt content."""
     return {"provider": "deepseek", **cache_metrics.snapshot()}
+
+
+@app.post("/feedback", response_model=FeedbackResponse)
+async def feedback(request: FeedbackRequest) -> FeedbackResponse:
+    """Persist a binary UI rating without collecting free-form personal data."""
+    append_feedback(request.event_id, request.rating)
+    logger.info("event=feedback event_id=%s rating=%s", request.event_id, request.rating)
+    return FeedbackResponse()
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -150,7 +161,9 @@ async def tool_chat(request: ChatRequest, http_request: Request) -> ToolChatResp
 @app.post("/agent-chat", response_model=AgentChatResponse)
 async def agent_chat(request: ChatRequest, http_request: Request) -> AgentChatResponse:
     trace_id = _trace_id_from_request(http_request)
+    event_id = f"run-{uuid4().hex}"
     start = perf_counter()
+    cache_before = cache_metrics.snapshot()
     try:
         chat_history = get_chat_history_text(request.session_id)
         with llm_override(request.llm, request.model):
@@ -162,15 +175,56 @@ async def agent_chat(request: ChatRequest, http_request: Request) -> AgentChatRe
                 persist_experience=_persist_experience_from_request(http_request),
             )
     except MissingApiKeyError as exc:
+        append_agent_run(
+            {
+                "event_id": event_id,
+                "trace_id": trace_id,
+                "session_fingerprint": session_fingerprint(request.session_id),
+                "endpoint": "/agent-chat",
+                "outcome": "error",
+                "status_code": status.HTTP_503_SERVICE_UNAVAILABLE,
+                "error_type": type(exc).__name__,
+                "elapsed_ms": int((perf_counter() - start) * 1000),
+                "cache": cache_delta(cache_before, cache_metrics.snapshot()),
+            }
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
         ) from exc
     except KnowledgeBaseNotFoundError as exc:
+        append_agent_run(
+            {
+                "event_id": event_id,
+                "trace_id": trace_id,
+                "session_fingerprint": session_fingerprint(request.session_id),
+                "endpoint": "/agent-chat",
+                "outcome": "error",
+                "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "error_type": type(exc).__name__,
+                "elapsed_ms": int((perf_counter() - start) * 1000),
+                "cache": cache_delta(cache_before, cache_metrics.snapshot()),
+            }
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(exc),
         ) from exc
+    except Exception as exc:
+        append_agent_run(
+            {
+                "event_id": event_id,
+                "trace_id": trace_id,
+                "session_fingerprint": session_fingerprint(request.session_id),
+                "endpoint": "/agent-chat",
+                "outcome": "error",
+                "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "error_type": type(exc).__name__,
+                "elapsed_ms": int((perf_counter() - start) * 1000),
+                "cache": cache_delta(cache_before, cache_metrics.snapshot()),
+            }
+        )
+        raise
 
     working_write = write_working_memory(request.session_id, request.message, result["answer"])
     memory_writes = list(result.get("memory_writes", []))
@@ -196,7 +250,8 @@ async def agent_chat(request: ChatRequest, http_request: Request) -> AgentChatRe
         if raw_action_source in {"llm", "hint_fallback", "rule_fallback"}
         else "rule_fallback"
     )
-    return AgentChatResponse(
+    response = AgentChatResponse(
+        event_id=event_id,
         answer=result["answer"],
         route=result["route"],
         router_reason=result["router_reason"],
@@ -298,3 +353,24 @@ async def agent_chat(request: ChatRequest, http_request: Request) -> AgentChatRe
             source=action_source,
         ),
     )
+    append_agent_run(
+        {
+            "event_id": event_id,
+            "trace_id": trace_id,
+            "session_fingerprint": session_fingerprint(request.session_id),
+            "endpoint": "/agent-chat",
+            "outcome": "success",
+            "route": response.route,
+            "steps_used": response.metrics.steps_used,
+            "tool_calls": response.metrics.tool_calls,
+            "used_tools": response.used_tools,
+            "sources_count": len(response.sources),
+            "contexts_count": len(response.retrieved_contexts),
+            "memory_hits": response.metrics.memory_hits,
+            "replanned": response.metrics.replanned,
+            "evaluation": {"passed": response.evaluation.passed, "score": response.evaluation.score},
+            "elapsed_ms": elapsed_ms,
+            "cache": cache_delta(cache_before, cache_metrics.snapshot()),
+        }
+    )
+    return response
