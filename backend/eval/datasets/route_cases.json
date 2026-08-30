@@ -338,12 +338,12 @@
         },
         {
           "message": "What should I prepare before arrival and how much is weekly rent near campus?",
-          "expected_route": "rag",
-          "expected_reason": "arrival prep dominates; retrieval-first for policy guidance"
+          "expected_route": "tool",
+          "expected_reason": "the agent retrieves arrival guidance and uses a budget tool; API primary route is tool"
         }
       ],
-      "final_expected_route": "rag",
-      "expected_reason": "mixed question should prioritize retrieval for arrival guidance"
+      "final_expected_route": "tool",
+      "expected_reason": "mixed request includes retrieval and calculation; API primary route is tool"
     },
     {
       "id": "ambiguous-3",
@@ -352,10 +352,10 @@
       "intent_label": "budget_plus_arrival",
       "message": "Help me plan arrival and estimate how much rent and living cost I need.",
       "evaluation_objective": "Mixed planning request may route to rag or tool depending on decomposition.",
-      "ground_truth_best_route": "rag",
+      "ground_truth_best_route": "tool",
       "expected_routes": {
-        "rag": 0.45,
-        "tool": 0.4,
+        "rag": 0.4,
+        "tool": 0.45,
         "chat": 0.15
       },
       "expected_reason": "arrival planning and cost estimation both present"

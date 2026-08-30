@@ -6,16 +6,28 @@
 
 面向赴澳留学生咨询场景的 **LLM Agent 系统**（政策问答、行前准备、生活预算等）。
 
-技术栈：**FastAPI + LangChain + LangGraph + FAISS + Gemini**，主要能力：
+技术栈：**FastAPI + LangChain + LangGraph + FAISS/BM25 混合检索 + DeepSeek**，主要能力：
 
 - 分层规划 + 动态 Observation→Action 循环
 - Observation–Action 环境抽象
 - 三层记忆（工作记忆 / 长期记忆 / 经验记忆）及读写轨迹
 - 世界知识 RAG（与 Agent 记忆分离）
-- 语言感知 RAG：中文问题优先检索 `*.zh-CN.md`，资料不足时再跨语言回退
+- 语言感知混合 RAG：中文问题优先检索 `*.zh-CN.md`，资料不足时跨语言回退，并做 source-level 重排
 - LLM-as-judge 反思 + 规则兜底
 - Tool Calling + RAG + 可解释路由
-- Trace 级可观测性与自动评测
+- Trace 级可观测性、DeepSeek 前缀缓存指标与自动评测
+
+## 已验证的评测结果
+
+最新本地 benchmark（2026-08-30）：
+
+| 套件 | 覆盖范围 | 结果 |
+|---|---:|---|
+| RAG | 检索与引用检查 | Recall@3 **100%**、来源元数据 **100%**、引用映射有效性 **100%**、相关来源引用 **100%** |
+| Route | 38 个 case / 45 个 turn | 严格准确率 **100%**、宽松准确率 **100%**、最终路由 **100%**、上下文/安全/歧义 **100%** |
+| Task | 61 条端到端任务 | 任务成功率 **100%**、请求错误 0、反思完成率 **100%**、评估器通过率 **93.44%** |
+
+Task 集覆盖单/多意图、`RAG → tool` 拆解、纯上下文更新、安全冲突、中文/中英混合、歧义与边界输入。JSON 报告保存在 `data/eval_reports/`，并按设计加入 `.gitignore`。
 
 ## 架构
 
@@ -89,6 +101,7 @@ backend/
 data/
   knowledge_base/      # 世界知识 markdown，中文文档使用 `*.zh-CN.md`
   memory/              # 长期 / 经验记忆产物
+  eval_reports/        # 已忽略的 RAG / route / task / cache 报告
 ```
 
 ## 环境搭建
@@ -249,6 +262,7 @@ python demo/agent_demo.py --persist-experience false
 
 ### 最终回答评估
 - 独立评估器打分（`EVALUATION_PASS_SCORE`）
+- 安全拒答与纯背景对话会按正确意图评估，不会被要求执行违法或未提出的任务
 - 首次失败触发 replan
 - 二次失败直接 finalize，避免死循环
 
@@ -264,32 +278,36 @@ python demo/agent_demo.py --persist-experience false
 ### 可观测性
 - 结构化日志带 `trace_id`
 - `LOG_LEVEL=TRACE` 可查看路由 / 规划 / 反思细节
+- `GET /metrics/llm-cache` 暴露 DeepSeek prompt-cache 用量；每次评测会在 `data/eval_reports/cache/` 生成一份缓存汇总
 
 ### 可靠性
-- Gemini 瞬时异常采用指数退避重试
+- 模型 / API 瞬时异常采用指数退避重试
 
-## 评测
+## 复现评测
 
 ```powershell
 cd backend
-python eval/route_eval.py --base-url http://127.0.0.1:8000
-python eval/task_eval.py --base-url http://127.0.0.1:8000
+.\.venv\Scripts\python.exe -m eval.route_eval
+.\.venv\Scripts\python.exe -m eval.task_eval
+.\.venv\Scripts\python.exe -m eval.rag_eval
 
-# 推荐：以同一个不可变 benchmark ID 运行路由、任务和 RAG 三套评测
-python eval/run_eval.py --base-url http://127.0.0.1:8000 --label baseline
+# 定向运行 task 回归，不覆盖完整 task-latest.json
+.\.venv\Scripts\python.exe -m eval.task_eval `
+  --case-ids task-tool-checklist,task-multi-settling-checklist-grounded `
+  --output-prefix task-targeted
 
-# 运行独立、版本化的安全回归数据集
-python eval/route_eval.py --cases-file eval/datasets/route_safety_cases.json
-python eval/task_eval.py --cases-file eval/datasets/task_safety_cases.json
-python eval/rag_eval.py --cases-file eval/datasets/rag_cases.json --top-k 3
-
-# 或将两套专项数据作为同一个 benchmark 运行
-python eval/run_eval.py --label safety-v1 --route-cases-file eval/datasets/route_safety_cases.json --task-cases-file eval/datasets/task_safety_cases.json
+# 路由评测遇到瞬时 API 故障时，从指定 case 续跑
+.\.venv\Scripts\python.exe -m eval.route_eval --from-case ambiguous-5
 ```
 
-报告：`eval/reports/route-eval-*.json` / `latest.json`，`task-eval-*.json` / `task-latest.json`。
-统一入口会为每次运行创建独立目录，并更新 `latest-summary.json`。请用 `baseline`、`reranker-v1`
-或 `runtime-budget-v1` 这类标签记录改动前后，确保比较可审计。
+报告写入 `data/eval_reports/{rag,route,task,cache}/`。Task Eval 默认记录单条请求错误并继续运行；若希望遇错立刻停止，可传 `--no-continue-on-error`。
+
+### 历史优化记录（已被最新结果替代）
+
+以下表格保留用于说明开发过程；当前 benchmark 请以文档顶部的“已验证的评测结果”为准。
+
+<details>
+<summary>展开历史优化记录</summary>
 
 | 分组 | 样本规模 | 优化前 → 优化后 | 报告（route / task） |
 |---|---|---|---|
@@ -356,3 +374,5 @@ Safety 回落说明：新增混合对抗样例 `adv-4` 暴露了拒答路径漏�
 | <span style="color:#c00"><strong>P0</strong></span> | 对抗安全 | 拒答 / prompt-injection 仍强制走 `rag`，禁止降到纯 `chat` |
 | **P1** | 延迟 | 缩短 `ambiguous-5` 类多步路径（超时仅发生在完整 Agent 链路） |
 | **P2** | 评测规范 | 保持 `--continue-on-error`；小样本与扩充评测集分区报告 |
+
+</details>

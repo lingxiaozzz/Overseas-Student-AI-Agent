@@ -130,7 +130,7 @@ class EvaluationInfo(BaseModel):
     passed: bool
     score: float
     feedback: str
-    source: Literal["llm", "rule_fallback"] = "rule_fallback"
+    source: Literal["llm", "rule_fallback", "safety_rule", "conversation_rule"] = "rule_fallback"
     triggered_replan: bool = False
 
 

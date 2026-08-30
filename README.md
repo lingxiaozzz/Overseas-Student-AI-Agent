@@ -4,16 +4,28 @@
 
 A production-oriented **LLM Agent runtime** for international student support.
 
-Built with **FastAPI + LangChain + LangGraph + FAISS + Gemini**, featuring:
+Built with **FastAPI + LangChain + LangGraph + hybrid FAISS/BM25 retrieval + DeepSeek**, featuring:
 
 - Hierarchical planning + dynamic Observation→Action loop
 - Observation-Action environment abstraction
 - Layered memory (working / long-term / experience) with read/write traces
 - World knowledge via RAG (separate from agent memory)
-- Language-aware RAG: Chinese queries prefer `*.zh-CN.md`, with cross-language fallback
+- Language-aware hybrid RAG: Chinese queries prefer `*.zh-CN.md`, with cross-language fallback and source-level re-ranking
 - LLM-as-judge reflection with guarded fallback
 - Tool calling + RAG + explainable routing
-- Trace-level observability and evaluation suites
+- Trace-level observability, DeepSeek prefix-cache metrics, and versioned evaluation suites
+
+## Verified Evaluation Results
+
+Latest local benchmark run (2026-08-30):
+
+| Suite | Coverage | Result |
+|---|---:|---|
+| RAG | Retrieval + citation checks | Recall@3 **100%**, source metadata **100%**, citation validity **100%**, relevant-source citation **100%** |
+| Route | 38 cases / 45 turns | Strict **100%**, lenient **100%**, final-route **100%**, context/safety/ambiguity **100%** |
+| Task | 61 end-to-end tasks | Task success **100%**, no request errors, reflection finish **100%**, evaluator pass **93.44%** |
+
+The task suite covers single and multi-intent requests, RAG→tool decomposition, context-only updates, safety conflicts, Chinese/mixed-language requests, ambiguity, and edge cases. Generated JSON reports are stored under `data/eval_reports/` and are intentionally gitignored.
 
 ## Architecture
 
@@ -87,6 +99,7 @@ backend/
 data/
   knowledge_base/      # World knowledge markdown, including Chinese `*.zh-CN.md` documents
   memory/              # Long-term + experience memory artifacts
+  eval_reports/        # Gitignored RAG / route / task / cache reports
 ```
 
 ## Setup
@@ -247,6 +260,7 @@ Useful headers:
 
 ### Final-answer evaluation
 - Dedicated evaluator scores the composed answer (`EVALUATION_PASS_SCORE`)
+- Safety refusals and background-only turns are evaluated against their correct intent, rather than against an unsafe or nonexistent requested action
 - Fail once triggers replan (`evaluation.triggered_replan=true`, `metrics.replanned=true`)
 - Second failure finalizes with score/feedback instead of infinite loops
 
@@ -262,32 +276,36 @@ Useful headers:
 ### Observability
 - Structured logs with `trace_id`
 - Set `LOG_LEVEL=TRACE` for routing/planning/reflection traces
+- DeepSeek prompt-cache usage is exposed at `GET /metrics/llm-cache`; each eval run persists one cache summary under `data/eval_reports/cache/`
 
 ### Reliability
-- Exponential backoff retries for transient Gemini errors
+- Exponential backoff retries for transient model/API errors
 
-## Evaluation
+## Reproduce Evaluation
 
 ```powershell
 cd backend
-python eval/route_eval.py --base-url http://127.0.0.1:8000
-python eval/task_eval.py --base-url http://127.0.0.1:8000
+.\.venv\Scripts\python.exe -m eval.route_eval
+.\.venv\Scripts\python.exe -m eval.task_eval
+.\.venv\Scripts\python.exe -m eval.rag_eval
 
-# Recommended: runs route, task, and RAG suites under one immutable benchmark ID
-python eval/run_eval.py --base-url http://127.0.0.1:8000 --label baseline
+# Run focused task regressions without overwriting task-latest.json
+.\.venv\Scripts\python.exe -m eval.task_eval `
+  --case-ids task-tool-checklist,task-multi-settling-checklist-grounded `
+  --output-prefix task-targeted
 
-# Run a focused, versioned safety regression dataset
-python eval/route_eval.py --cases-file eval/datasets/route_safety_cases.json
-python eval/task_eval.py --cases-file eval/datasets/task_safety_cases.json
-python eval/rag_eval.py --cases-file eval/datasets/rag_cases.json --top-k 3
-
-# Or run both focused datasets as a single benchmark
-python eval/run_eval.py --label safety-v1 --route-cases-file eval/datasets/route_safety_cases.json --task-cases-file eval/datasets/task_safety_cases.json
+# Continue a route run after a transient API failure
+.\.venv\Scripts\python.exe -m eval.route_eval --from-case ambiguous-5
 ```
 
-Reports: `eval/reports/route-eval-*.json` / `latest.json`, `task-eval-*.json` / `task-latest.json`.
-The unified runner writes an isolated folder per run plus `latest-summary.json`; use a label such as
-`baseline`, `reranker-v1`, or `runtime-budget-v1` to make before/after comparisons auditable.
+Reports are written to `data/eval_reports/{rag,route,task,cache}/`. Task evaluation records request failures and continues by default; use `--no-continue-on-error` when a failure should stop the run.
+
+### Historical optimization notes (superseded)
+
+The tables below document earlier iterations. They are retained for the development story only; use **Verified Evaluation Results** above for the current benchmark.
+
+<details>
+<summary>Show historical optimisation iterations</summary>
 
 | Group | Suite | Before → After | Reports (route / task) |
 |---|---|---|---|
@@ -354,3 +372,5 @@ Safety drop note: new mixed adversarial case `adv-4` exposed a refusal-path hole
 | <span style="color:#c00"><strong>P0</strong></span> | Adversarial safety | Keep refusals / prompt-injection on forced `rag`; never degrade to `chat` |
 | **P1** | Latency | Shorten `ambiguous-5`-style multi-step paths (timeout is full-agent only) |
 | **P2** | Eval hygiene | Keep `--continue-on-error`; report small vs expanded eval sets separately |
+
+</details>

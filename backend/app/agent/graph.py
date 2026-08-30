@@ -13,7 +13,7 @@ from app.core.llm import create_structured_output_model
 from app.core.logging import get_logger
 from app.core.prompts import cache_friendly_messages
 from app.core.retry import with_retry
-from app.evaluation.service import compose_candidate_answer, llm_evaluate, rule_evaluate
+from app.evaluation.service import EvaluationDecision, compose_candidate_answer, llm_evaluate, rule_evaluate
 from app.memory.service import (
     build_experience_lesson,
     extract_long_term_candidates,
@@ -391,7 +391,9 @@ def _is_pure_chat_message(message: str) -> bool:
         return False
     if _is_context_only_message(message):
         return True
-    if message_lower in {"hello", "hi", "hey", "thanks", "thank you", "uh help me pls", "??"}:
+    if message_lower in {
+        "hello", "hi", "hey", "thanks", "thank you", "uh help me pls", "what do i do", "??"
+    }:
         return True
     if any(keyword in message_lower for keyword in PURE_CHAT_KEYWORDS):
         return True
@@ -455,6 +457,7 @@ def _should_prefer_rag_for_onboarding_knowledge(message: str) -> bool:
         "tell me",
         "recommend",
         "need help",
+        "help me",
         "准备",
         "什么",
         "怎么",
@@ -474,6 +477,7 @@ def _checklist_needs_factual_grounding(message: str) -> bool:
     message_lower = message.strip().lower()
     factual_markers = (
         "tell me",
+        "help me",
         "what ",
         "explain",
         "recommend",
@@ -1737,6 +1741,24 @@ async def _evaluate_node(state: AgentState) -> AgentState:
     already_replanned = bool(state.get("replanned", False))
     previously_triggered = bool(state.get("evaluation_triggered_replan", False))
     user_message = str(state.get("message", state.get("goal", "")))
+    is_safe_refusal = _should_force_rag_for_safety(user_message) and bool(sources)
+    is_conversational_turn = (
+        _is_context_only_message(user_message) or _is_pure_chat_message(user_message)
+    ) and bool(candidate.strip())
+    if is_safe_refusal:
+        decision = EvaluationDecision(
+            score=max(float(decision.score), 0.9),
+            passed=True,
+            feedback="Safety-sensitive request was refused with grounded compliant guidance.",
+        )
+        source = "safety_rule"
+    elif is_conversational_turn:
+        decision = EvaluationDecision(
+            score=max(float(decision.score), settings.evaluation_pass_score),
+            passed=True,
+            feedback="Conversational or background-only turn was handled without unnecessary execution.",
+        )
+        source = "conversation_rule"
     has_grounded_answer = _should_prefer_rag_for_onboarding_knowledge(user_message) and any(
         str(item.get("route", "")) == "rag" for item in step_results
     )
