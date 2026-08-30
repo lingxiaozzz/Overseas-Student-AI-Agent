@@ -8,6 +8,11 @@
 
 [在线 Demo](https://overseas-student-ai-agent.onrender.com/) · [![CI](https://github.com/lingxiaozzz/Overseas-Student-AI-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/lingxiaozzz/Overseas-Student-AI-Agent/actions/workflows/ci.yml)
 
+## 在线界面
+
+<img src="docs/images/web-chat-demo.png" alt="中文留学生咨询助手在线界面" width="900" />
+
+
 技术栈：**FastAPI + LangChain + LangGraph + FAISS/BM25 混合检索 + DeepSeek**，主要能力：
 
 - 分层规划 + 动态 Observation→Action 循环
@@ -308,6 +313,7 @@ python demo/agent_demo.py --persist-experience false
 
 ### 可靠性
 - 模型 / API 瞬时异常采用指数退避重试
+- 公开 POST 接口使用进程内滑动窗口限流：默认每 IP 每分钟 4 次、每小时 30 次；反馈接口每分钟 10 次，`/health` 不限流。可通过 `RATE_LIMIT_*` 环境变量调整，受控压测可设 `RATE_LIMIT_ENABLED=false`
 
 ## 复现评测
 

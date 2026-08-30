@@ -6,6 +6,11 @@ A production-oriented **LLM Agent runtime** for international student support.
 
 [Live Demo](https://overseas-student-ai-agent.onrender.com/) · [![CI](https://github.com/lingxiaozzz/Overseas-Student-AI-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/lingxiaozzz/Overseas-Student-AI-Agent/actions/workflows/ci.yml)
 
+## Product Preview
+
+<img src="docs/images/web-chat-demo.png" alt="Chinese student-support web chat" width="900" />
+
+
 Built with **FastAPI + LangChain + LangGraph + hybrid FAISS/BM25 retrieval + DeepSeek**, featuring:
 
 - Hierarchical planning + dynamic Observation→Action loop
@@ -306,6 +311,7 @@ Useful headers:
 
 ### Reliability
 - Exponential backoff retries for transient model/API errors
+- Public POST endpoints use an in-memory sliding-window limit: by default, 4 requests/IP/minute and 30/IP/hour; feedback allows 10/IP/minute and `/health` is exempt. Configure with `RATE_LIMIT_*`, or set `RATE_LIMIT_ENABLED=false` for controlled load tests
 
 ## Reproduce Evaluation
 

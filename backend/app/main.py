@@ -32,6 +32,7 @@ from app.core.cache_metrics import cache_metrics
 from app.core.llm import MissingApiKeyError, llm_override
 from app.core.logging import get_logger
 from app.core.observability import append_agent_run, append_feedback, cache_delta, session_fingerprint
+from app.core.rate_limit import enforce_request_rate_limit
 from app.memory.service import append_turn, get_chat_history_text, write_working_memory
 from app.rag.service import KnowledgeBaseNotFoundError, generate_rag_response
 from app.tools.service import generate_tool_response
@@ -75,8 +76,9 @@ async def llm_cache_metrics() -> dict[str, int | float | str]:
 
 
 @app.post("/feedback", response_model=FeedbackResponse)
-async def feedback(request: FeedbackRequest) -> FeedbackResponse:
+async def feedback(request: FeedbackRequest, http_request: Request) -> FeedbackResponse:
     """Persist a binary UI rating without collecting free-form personal data."""
+    enforce_request_rate_limit(http_request, "feedback")
     append_feedback(request.event_id, request.rating)
     logger.info("event=feedback event_id=%s rating=%s", request.event_id, request.rating)
     return FeedbackResponse()
@@ -84,6 +86,7 @@ async def feedback(request: FeedbackRequest) -> FeedbackResponse:
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest, http_request: Request) -> ChatResponse:
+    enforce_request_rate_limit(http_request, "api")
     trace_id = _trace_id_from_request(http_request)
     start = perf_counter()
     try:
@@ -106,6 +109,7 @@ async def chat(request: ChatRequest, http_request: Request) -> ChatResponse:
 
 @app.post("/rag-chat", response_model=RagChatResponse)
 async def rag_chat(request: ChatRequest, http_request: Request) -> RagChatResponse:
+    enforce_request_rate_limit(http_request, "api")
     trace_id = _trace_id_from_request(http_request)
     start = perf_counter()
     try:
@@ -137,6 +141,7 @@ async def rag_chat(request: ChatRequest, http_request: Request) -> RagChatRespon
 
 @app.post("/tool-chat", response_model=ToolChatResponse)
 async def tool_chat(request: ChatRequest, http_request: Request) -> ToolChatResponse:
+    enforce_request_rate_limit(http_request, "api")
     trace_id = _trace_id_from_request(http_request)
     start = perf_counter()
     try:
@@ -160,6 +165,7 @@ async def tool_chat(request: ChatRequest, http_request: Request) -> ToolChatResp
 
 @app.post("/agent-chat", response_model=AgentChatResponse)
 async def agent_chat(request: ChatRequest, http_request: Request) -> AgentChatResponse:
+    enforce_request_rate_limit(http_request, "api")
     trace_id = _trace_id_from_request(http_request)
     event_id = f"run-{uuid4().hex}"
     start = perf_counter()

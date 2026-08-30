@@ -9,16 +9,20 @@ os.environ["RUNTIME_DATA_PATH"] = RUNTIME_DIR.name
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from app.core.config import settings  # noqa: E402
 from app.main import app  # noqa: E402
 
 
 class ApiSmokeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        cls.previous_feedback_path = settings.feedback_log_path
+        settings.feedback_log_path = Path(RUNTIME_DIR.name) / "observability" / "feedback.jsonl"
         cls.client = TestClient(app)
 
     @classmethod
     def tearDownClass(cls) -> None:
+        settings.feedback_log_path = cls.previous_feedback_path
         RUNTIME_DIR.cleanup()
 
     def test_health_and_web_page(self) -> None:

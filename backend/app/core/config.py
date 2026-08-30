@@ -36,6 +36,12 @@ class Settings:
     retry_initial_seconds: float = float(os.getenv("RETRY_INITIAL_SECONDS", "1.0"))
     retry_max_seconds: float = float(os.getenv("RETRY_MAX_SECONDS", "8.0"))
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
+    rate_limit_enabled: bool = os.getenv("RATE_LIMIT_ENABLED", "true").lower() in {
+        "1", "true", "yes", "on"
+    }
+    api_rate_limit_per_minute: int = int(os.getenv("API_RATE_LIMIT_PER_MINUTE", "4"))
+    api_rate_limit_per_hour: int = int(os.getenv("API_RATE_LIMIT_PER_HOUR", "30"))
+    feedback_rate_limit_per_minute: int = int(os.getenv("FEEDBACK_RATE_LIMIT_PER_MINUTE", "10"))
     max_plan_steps: int = int(os.getenv("MAX_PLAN_STEPS", "4"))
     max_agent_steps: int = int(os.getenv("MAX_AGENT_STEPS", "6"))
     max_tool_calls: int = int(os.getenv("MAX_TOOL_CALLS", "3"))
