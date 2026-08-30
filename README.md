@@ -4,6 +4,8 @@
 
 A production-oriented **LLM Agent runtime** for international student support.
 
+[Live Demo](https://overseas-student-ai-agent.onrender.com/) · [![CI](https://github.com/lingxiaozzz/Overseas-Student-AI-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/lingxiaozzz/Overseas-Student-AI-Agent/actions/workflows/ci.yml)
+
 Built with **FastAPI + LangChain + LangGraph + hybrid FAISS/BM25 retrieval + DeepSeek**, featuring:
 
 - Hierarchical planning + dynamic Observation→Action loop

@@ -6,6 +6,8 @@
 
 面向赴澳留学生咨询场景的 **LLM Agent 系统**（政策问答、行前准备、生活预算等）。
 
+[在线 Demo](https://overseas-student-ai-agent.onrender.com/) · [![CI](https://github.com/lingxiaozzz/Overseas-Student-AI-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/lingxiaozzz/Overseas-Student-AI-Agent/actions/workflows/ci.yml)
+
 技术栈：**FastAPI + LangChain + LangGraph + FAISS/BM25 混合检索 + DeepSeek**，主要能力：
 
 - 分层规划 + 动态 Observation→Action 循环
