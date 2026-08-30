@@ -1,37 +1,39 @@
-# Overseas-Student-AI-Agent
+# 留学生咨询AI智能体
 
-**English** | [中文](./README.zh-CN.md)
+**中文** | [English](./README.en.md)
 
-A production-oriented **LLM Agent runtime** for international student support.
+> 仓库名：`Overseas-Student-AI-Agent`
 
-[Live Demo](https://overseas-student-ai-agent.onrender.com/) · [![CI](https://github.com/lingxiaozzz/Overseas-Student-AI-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/lingxiaozzz/Overseas-Student-AI-Agent/actions/workflows/ci.yml)
+面向赴澳留学生咨询场景的 **LLM Agent 系统**（政策问答、行前准备、生活预算等）。
 
-Built with **FastAPI + LangChain + LangGraph + hybrid FAISS/BM25 retrieval + DeepSeek**, featuring:
+[在线 Demo](https://overseas-student-ai-agent.onrender.com/) · [![CI](https://github.com/lingxiaozzz/Overseas-Student-AI-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/lingxiaozzz/Overseas-Student-AI-Agent/actions/workflows/ci.yml)
 
-- Hierarchical planning + dynamic Observation→Action loop
-- Observation-Action environment abstraction
-- Layered memory (working / long-term / experience) with read/write traces
-- World knowledge via RAG (separate from agent memory)
-- Language-aware hybrid RAG: Chinese queries prefer `*.zh-CN.md`, with cross-language fallback and source-level re-ranking
-- LLM-as-judge reflection with guarded fallback
-- Tool calling + RAG + explainable routing
-- Trace-level observability, DeepSeek prefix-cache metrics, and versioned evaluation suites
+技术栈：**FastAPI + LangChain + LangGraph + FAISS/BM25 混合检索 + DeepSeek**，主要能力：
 
-## Verified Evaluation Results
+- 分层规划 + 动态 Observation→Action 循环
+- Observation–Action 环境抽象
+- 三层记忆（工作记忆 / 长期记忆 / 经验记忆）及读写轨迹
+- 世界知识 RAG（与 Agent 记忆分离）
+- 语言感知混合 RAG：中文问题优先检索 `*.zh-CN.md`，资料不足时跨语言回退，并做 source-level 重排
+- LLM-as-judge 反思 + 规则兜底
+- Tool Calling + RAG + 可解释路由
+- Trace 级可观测性、DeepSeek 前缀缓存指标与自动评测
 
-Latest local benchmark run (2026-08-30):
+## 已验证的评测结果
 
-| Suite | Coverage | Result |
+最新本地 benchmark（2026-08-30）：
+
+| 套件 | 覆盖范围 | 结果 |
 |---|---:|---|
-| RAG | Retrieval + citation checks | Recall@3 **100%**, source metadata **100%**, citation validity **100%**, relevant-source citation **100%** |
-| Route | 38 cases / 45 turns | Strict **100%**, lenient **100%**, final-route **100%**, context/safety/ambiguity **100%** |
-| Task | 61 end-to-end tasks | Task success **100%**, no request errors, reflection finish **100%**, evaluator pass **93.44%** |
+| RAG | 检索与引用检查 | Recall@3 **100%**、来源元数据 **100%**、引用映射有效性 **100%**、相关来源引用 **100%** |
+| Route | 38 个 case / 45 个 turn | 严格准确率 **100%**、宽松准确率 **100%**、最终路由 **100%**、上下文/安全/歧义 **100%** |
+| Task | 61 条端到端任务 | 任务成功率 **100%**、请求错误 0、反思完成率 **100%**、评估器通过率 **93.44%** |
 
-The task suite covers single and multi-intent requests, RAG→tool decomposition, context-only updates, safety conflicts, Chinese/mixed-language requests, ambiguity, and edge cases. Generated JSON reports are stored under `data/eval_reports/` and are intentionally gitignored.
+Task 集覆盖单/多意图、`RAG → tool` 拆解、纯上下文更新、安全冲突、中文/中英混合、歧义与边界输入。JSON 报告保存在 `data/eval_reports/`，并按设计加入 `.gitignore`。
 
-## Architecture
+## 架构
 
-### High-level system
+### 系统总览
 
 ```mermaid
 flowchart LR
@@ -50,7 +52,7 @@ flowchart LR
     Mem --> Exp[(Experience JSON)]
 ```
 
-### Agent decision loop
+### Agent 决策循环
 
 ```mermaid
 flowchart TD
@@ -68,44 +70,44 @@ flowchart TD
     Finalize --> End[API Response]
 ```
 
-### Memory layers
+### 记忆分层
 
-| Layer | Role | Storage |
+| 层级 | 作用 | 存储 |
 |---|---|---|
-| Working memory | Recent conversation turns | In-process by `session_id` |
-| Long-term memory | Durable student profile/constraints | `data/memory/long_term.json` |
-| Experience memory | Task lessons for future planning | `data/memory/experiences.json` |
-| World knowledge | Policies/checklists/facts | `data/knowledge_base` + FAISS |
+| 工作记忆（Working） | 近期对话轮次 | 进程内，按 `session_id` |
+| 长期记忆（Long-term） | 持久学生画像 / 约束 | `data/memory/long_term.json` |
+| 经验记忆（Experience） | 可复用的任务策略经验 | `data/memory/experiences.json` |
+| 世界知识（World knowledge） | 政策 / 清单 / 事实 | `data/knowledge_base` + FAISS |
 
-## Project Structure
+## 项目结构
 
 ```text
 backend/
   app/
-    main.py            # FastAPI application entry point
-    api/schemas.py     # Request/response models
-    agent/             # LangGraph runtime, environment, direct chat
-    rag/               # FAISS retrieval, official fetch, MCP server
-    memory/            # Working, long-term, experience memory
-    tools/             # Internal tools (budget, checklist)
-    evaluation/        # Final-answer scoring
-    web/               # Dependency-free product-facing chat MVP
-    core/              # Settings, LLM, retry, logging, prompts
-    utils/             # Shared content utilities
+    main.py            # FastAPI 应用入口
+    api/schemas.py     # 请求 / 响应模型
+    agent/             # LangGraph 运行时、环境、直接对话
+    rag/               # FAISS 检索、官方抓取、MCP 服务
+    memory/            # 工作、长期、经验记忆
+    tools/             # 内部工具（预算、清单）
+    evaluation/        # 最终回答打分
+    web/               # 无前端构建依赖的产品化聊天 MVP
+    core/              # 配置、LLM、重试、日志、提示词
+    utils/             # 公共内容工具
   demo/
-    agent_demo.py      # Demo runner
+    agent_demo.py      # 演示脚本
   eval/
-    route_eval.py      # Route accuracy evaluation
-    task_eval.py       # Task success / steps / tools evaluation
-    rag_eval.py        # Retrieval Recall@K / MRR evaluation
-    run_eval.py        # Unified benchmark entry point
+    route_eval.py      # 路由准确率评测
+    task_eval.py       # 任务成功 / 步数 / 工具评测
+    rag_eval.py        # 检索 Recall@K / MRR 评测
+    run_eval.py        # 统一 benchmark 入口
 data/
-  knowledge_base/      # World knowledge markdown, including Chinese `*.zh-CN.md` documents
-  memory/              # Long-term + experience memory artifacts
-  eval_reports/        # Gitignored RAG / route / task / cache reports
+  knowledge_base/      # 世界知识 markdown，中文文档使用 `*.zh-CN.md`
+  memory/              # 长期 / 经验记忆产物
+  eval_reports/        # 已忽略的 RAG / route / task / cache 报告
 ```
 
-## Setup
+## 环境搭建
 
 ```powershell
 cd backend
@@ -114,7 +116,7 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Create `.env` in the project root (copy from `.env.example`):
+在项目根目录创建 `.env`（可复制 `.env.example`）：
 
 ```text
 LLM_PROVIDER=deepseek
@@ -146,90 +148,90 @@ OFFICIAL_FETCH_MAX_CHARS=4000
 OFFICIAL_FETCH_MAX_PAGES=2
 ```
 
-API key: https://aistudio.google.com/app/apikey
+API Key：https://aistudio.google.com/app/apikey
 
-Default chat model is DeepSeek (`deepseek-v4-flash`), with thinking disabled (`DEEPSEEK_THINKING=false`) to keep cost down. Conversation history is sent as separate turns so DeepSeek prefix cache can hit. Gemini (`gemini-2.5-flash`) is optional: set `LLM_PROVIDER=gemini` or pass `"llm": "gemini"` / `"model": "gemini-2.5-flash"` in the request. `deepseek-chat` is still supported. RAG embeddings still use Gemini, so `GOOGLE_API_KEY` is still required for `/rag-chat` and agent retrieval.
+默认对话模型是 DeepSeek（`deepseek-v4-flash`），thinking 默认关闭（`DEEPSEEK_THINKING=false`）以降低费用。对话历史拆成多轮 messages，方便 DeepSeek 前缀缓存命中。Gemini（`gemini-2.5-flash`）可选：设置 `LLM_PROVIDER=gemini`，或在请求里传 `"llm": "gemini"` / `"model": "gemini-2.5-flash"`。`deepseek-chat` 仍然可用。RAG 向量仍走 Gemini，因此 `/rag-chat` 和 Agent 检索仍需要 `GOOGLE_API_KEY`。
 
-Policy RAG also fetches allowlisted official pages (Home Affairs / Study Australia / USYD / PrivateHealth). Budget and checklist stay internal tools, not MCP. Official Fetch MCP:
+政策类 RAG 会额外抓取白名单官方页（Home Affairs / Study Australia / USYD / PrivateHealth）。预算和清单仍是内部 tool，不走 MCP。官方 Fetch MCP：
 
 ```powershell
 cd backend
 python -m app.rag.mcp_official_fetch
 ```
 
-Cursor is configured via `.cursor/mcp.json`. Tools: `list_official_sources`, `fetch_official_page`. Non-allowlisted URLs are rejected.
+Cursor 已配置 `.cursor/mcp.json`。工具：`list_official_sources`、`fetch_official_page`。非白名单 URL 会被拒绝。
 
-## Run the API
+## 启动 API
 
 ```powershell
 cd backend
 python -m uvicorn app.main:app --reload
 ```
 
-Docs: http://127.0.0.1:8000/docs
+接口文档：http://127.0.0.1:8000/docs
 
-Web Chat MVP: http://127.0.0.1:8000/
+Web Chat MVP：http://127.0.0.1:8000/
 
-The web client calls `/agent-chat` directly and shows the final answer, retrieved sources, tool usage, and a collapsible Agent execution trace. It has no separate frontend build or server.
+网页直接调用 `/agent-chat`，展示最终回答、检索来源、工具使用情况和可折叠的 Agent 执行轨迹；不需要额外前端构建或前端服务。
 
-Main endpoint: `POST /agent-chat`
+主接口：`POST /agent-chat`
 
-Also available:
+其他接口：
 
 - `POST /chat`
 - `POST /rag-chat`
 - `POST /tool-chat`
 - `GET /health`
 
-## Docker and Deployment
+## Docker 与部署
 
-The included Docker image serves the API and Chinese web client together. It uses the platform-provided `PORT` when available and exposes `/health` for service checks.
+项目内置 Docker 镜像，同时提供 API 与中文网页；部署平台若提供 `PORT` 环境变量会自动使用，并提供 `/health` 健康检查。
 
 ```powershell
-# From the repository root; never add real keys to .env.example.
+# 在仓库根目录执行；不要把真实密钥写入 .env.example。
 Copy-Item .env.example .env
-# Fill GOOGLE_API_KEY and DEEPSEEK_API_KEY in .env.
+# 在 .env 中填写 GOOGLE_API_KEY 和 DEEPSEEK_API_KEY。
 docker build -t overseas-student-agent .
 docker run --rm -p 8000:8000 --env-file .env -v "${PWD}/data:/app/runtime-data" overseas-student-agent
 ```
 
-Open `http://127.0.0.1:8000/` and check `http://127.0.0.1:8000/health` returns `{"status":"ok"}`.
+打开 `http://127.0.0.1:8000/`，并确认 `http://127.0.0.1:8000/health` 返回 `{"status":"ok"}`。
 
-For a Render/Railway-style Docker deployment, connect the repository, select the `Dockerfile`, and add `GOOGLE_API_KEY` and `DEEPSEEK_API_KEY` as platform secrets (plus any optional variables from `.env.example`). Do not configure a separate start command: the image already honors `PORT`. To retain long-term memory, run telemetry, and feedback after a redeploy, attach persistent storage at `/app/runtime-data`; otherwise these runtime artifacts are intentionally ephemeral. The knowledge base remains packaged separately at `/app/data/knowledge_base`, so it is not hidden by the mounted disk.
+部署到 Render / Railway 一类支持 Docker 的平台时：连接仓库、选择根目录 `Dockerfile`，并把 `GOOGLE_API_KEY`、`DEEPSEEK_API_KEY`（以及 `.env.example` 中的可选变量）配置为平台 Secret。镜像已自动读取 `PORT`，无需另填启动命令。如需在重新部署后保留长期记忆、运行日志和反馈数据，请将持久化磁盘挂载到 `/app/runtime-data`；否则这些运行时数据会按预期丢失。知识库仍独立打包在 `/app/data/knowledge_base`，不会被数据盘遮挡。
 
-## 60-second Demo
+## 60 秒演示
 
-Start the API, then run:
+先启动 API，再运行：
 
 ```powershell
 cd backend
 python demo/agent_demo.py --base-url http://127.0.0.1:8000
 ```
 
-The demo walks through 3 scenarios:
+Demo 覆盖 3 个场景：
 
-1. **RAG**: USYD pre-arrival checklist  
-2. **Tool**: weekly budget estimation  
-3. **Multi-step**: arrival prep + budget in one request  
+1. **RAG**：USYD 行前准备清单  
+2. **Tool**：每周生活预算估算  
+3. **多步**：行前准备 + 预算合并请求  
 
-It prints for each case:
+每条会打印：
 
 - `trace_id`
 - plan / subgoals
-- step routes and rewards
-- reflection (`judge_source`, `goal_achieved`, lesson)
-- evaluation (`score`, `passed`, `feedback`, `triggered_replan`)
-- metrics (`steps_used`, `tool_calls`, `memory_hits`, rewards)
+- 逐步 route 与 reward
+- reflection（`judge_source`、`goal_achieved`、lesson）
+- evaluation（`score`、`passed`、`feedback`、`triggered_replan`）
+- metrics（`steps_used`、`tool_calls`、`memory_hits`、rewards）
 - environment action space
 
-Optional flags:
+可选参数：
 
 ```powershell
 python demo/agent_demo.py --base-url http://127.0.0.1:8000 --session-id demo-interview-001
 python demo/agent_demo.py --persist-experience false
 ```
 
-### Manual demo request
+### 手动请求示例
 
 ```json
 {
@@ -238,75 +240,76 @@ python demo/agent_demo.py --persist-experience false
 }
 ```
 
-Useful headers:
+常用 Header：
 
 - `x-trace-id: demo-multi-001`
-- `x-persist-experience: false` (for eval/demo without writing memory)
+- `x-persist-experience: false`（评测 / 演示时不写入持久化记忆）
 
-## Agent Response Highlights
+## Agent 响应要点
 
-`/agent-chat` returns:
+`/agent-chat` 返回：
 
-- `plan`: goal + soft subgoal hints
-- `steps`: per-step route/action/reward/tools (actual executed actions)
-- `last_observation` / `last_action_decision`: Observation→Action transparency
-- `reflection`: LLM judge result (`continue/replan/finish`, lesson, `goal_achieved`)
-- `evaluation`: final-answer score/pass, feedback, and whether replan was triggered
-- `metrics`: steps, tool calls, replan flag, memory hits, rewards
-- `budget`: global step/tool/runtime limits, remaining capacity, and any stop reason
-- `memory_lessons`: retrieved experience lessons
-- `memory_reads` / `memory_writes`: Working / Long-term / Experience access trace
-- `long_term_facts`: long-term facts loaded for this turn
-- `environment`: `{ name, action_space }`
-- `sources` / `retrieved_contexts`: RAG explainability
-- RAG answers: inline `[n]` citations plus a deterministic `Sources` mapping
-- `used_tools`: executed tools
+- `plan`：目标 + 软性子目标提示
+- `steps`：逐步 route / action / reward / tools（实际执行结果）
+- `last_observation` / `last_action_decision`：Observation→Action 可解释性
+- `reflection`：LLM 判定（`continue/replan/finish`、lesson、`goal_achieved`）
+- `evaluation`：最终回答分数 / 是否通过、反馈、是否触发 replan
+- `metrics`：步数、工具调用、replan 标记、记忆命中、reward
+- `budget`：全局步数 / 工具 / 运行时间上限、剩余额度与停止原因
+- `memory_lessons`：检索到的经验策略
+- `memory_reads` / `memory_writes`：三层记忆访问轨迹
+- `long_term_facts`：本轮加载的长期事实
+- `environment`：`{ name, action_space }`
+- `sources` / `retrieved_contexts`：RAG 溯源
+- RAG 回答：正文 `[n]` 引用与确定性的 `Sources` 编号映射
+- `used_tools`：已执行工具
 
-## Core Capabilities
+## 核心能力
 
-### Hierarchical planning + Observation→Action loop
-- Runtime: `plan -> act -> execute -> reflect -> evaluate (-> replan) -> finalize`
-- Planner emits soft subgoal hints (not a hard-locked execution queue)
-- Each `act` step observes the environment, then chooses the next Action (`chat`/`rag`/`tool` + content)
-- Cap with `MAX_PLAN_STEPS`; response exposes `last_observation` and `last_action_decision`
-- Global execution budgets cap total steps across replans, tool calls, and elapsed runtime; response exposes `budget.stop_reason`
+### 分层规划 + Observation→Action
+- 运行时：`plan -> act -> execute -> reflect -> evaluate (-> replan) -> finalize`
+- Planner 产出软性提示（非硬锁定执行队列）
+- 每步 `act` 先观察环境，再选择 Action（`chat` / `rag` / `tool` + content）
+- 受 `MAX_PLAN_STEPS` 约束；响应暴露 `last_observation` 与 `last_action_decision`
+- 全局执行预算会限制跨 replan 的总步数、工具调用与运行时间；响应通过 `budget.stop_reason` 暴露停止原因
 
-### Environment abstraction
-- Unified Observation-Action interface in `app/agent/environment.py`
-- Current adapter: `student_support` (`chat` / `rag` / `tool`)
-- Step rewards exposed as `last_reward` / `total_reward`
+### 环境抽象
+- `app/agent/environment.py` 统一 Observation–Action 接口
+- 当前适配器：`student_support`（`chat` / `rag` / `tool`）
+- 逐步 reward：`last_reward` / `total_reward`
 
-### Reflection
-- LLM-as-judge for progress and next action
-- Hard guards + rule fallback for reliability
-- Actionable lessons written into experience memory
+### 反思
+- LLM-as-judge 判断进度与下一步动作
+- 硬性守卫 + 规则兜底
+- 可执行 lesson 写入经验记忆
 
-### Final-answer evaluation
-- Dedicated evaluator scores the composed answer (`EVALUATION_PASS_SCORE`)
-- Safety refusals and background-only turns are evaluated against their correct intent, rather than against an unsafe or nonexistent requested action
-- Fail once triggers replan (`evaluation.triggered_replan=true`, `metrics.replanned=true`)
-- Second failure finalizes with score/feedback instead of infinite loops
+### 最终回答评估
+- 独立评估器打分（`EVALUATION_PASS_SCORE`）
+- 安全拒答与纯背景对话会按正确意图评估，不会被要求执行违法或未提出的任务
+- 首次失败触发 replan
+- 二次失败直接 finalize，避免死循环
 
-### Memory (3 layers)
-- **Working memory**: short-term session turns (`MEMORY_MAX_TURNS`)
-- **Long-term memory**: durable student profile/constraints (`data/memory/long_term.json`)
-- Long-term facts store `key`, `value`, `confidence`, `status`, and timestamps; conflicting profile values supersede old facts and stale records are excluded after the configured TTL
-- **Experience memory**: reusable strategy lessons (`data/memory/experiences.json`)
-- Each `/agent-chat` turn returns `memory_reads` + `memory_writes` with layer/status/count/items
-- World knowledge remains separate via FAISS RAG
-- Eval/demo sessions can disable durable writes (`x-persist-experience: false`)
+### 记忆（三层）
+- **工作记忆**：短会话（`MEMORY_MAX_TURNS`）
+- **长期记忆**：持久画像（`data/memory/long_term.json`）
+- 长期事实保存 `key`、`value`、`confidence`、`status` 与时间戳；新画像会将同 key 旧值标记为 `superseded`，超过 TTL 的事实不会被读取
+- **经验记忆**：策略经验（`data/memory/experiences.json`）
+- 每轮返回 `memory_reads` + `memory_writes`
+- 世界知识仍由 FAISS RAG 单独提供
+- 评测 / 演示可用 `x-persist-experience: false` 关闭持久写入
 
-### Observability
-- Structured logs with `trace_id`
-- Set `LOG_LEVEL=TRACE` for routing/planning/reflection traces
-- DeepSeek prompt-cache usage is exposed at `GET /metrics/llm-cache`; each eval run persists one cache summary under `data/eval_reports/cache/`
-- Each `/agent-chat` turn appends a privacy-conscious event to `data/observability/agent_runs.jsonl`: route, steps, tools, latency, evaluation, and per-request cache delta—never the prompt or answer body
-- The web UI provides helpful / not-helpful feedback per answer. Feedback is stored in `data/observability/feedback.jsonl` and linked to the run by `event_id`
+### 可观测性
+- 结构化日志带 `trace_id`
+- `LOG_LEVEL=TRACE` 可查看路由 / 规划 / 反思细节
+- `GET /metrics/llm-cache` 暴露 DeepSeek prompt-cache 用量；每次评测会在 `data/eval_reports/cache/` 生成一份缓存汇总
+- 每次 `/agent-chat` 会在 `data/observability/agent_runs.jsonl` 记录匿名运行事件：路由、步骤、工具、耗时、评估结果与本次缓存增量；不记录问题或回答正文
+- 网页回答下方提供“有帮助 / 没帮助”反馈，写入 `data/observability/feedback.jsonl`，并通过 `event_id` 关联对应运行
+- 可运行 `python -m eval.observability_report` 汇总成功率、路由分布、平均/P95 耗时、缓存命中、工具/重规划率、评估通过率与用户反馈率；可用 `--data-dir` 读取部署平台导出的运行数据
 
-### Reliability
-- Exponential backoff retries for transient model/API errors
+### 可靠性
+- 模型 / API 瞬时异常采用指数退避重试
 
-## Reproduce Evaluation
+## 复现评测
 
 ```powershell
 cd backend
@@ -314,38 +317,38 @@ cd backend
 .\.venv\Scripts\python.exe -m eval.task_eval
 .\.venv\Scripts\python.exe -m eval.rag_eval
 
-# Run focused task regressions without overwriting task-latest.json
+# 定向运行 task 回归，不覆盖完整 task-latest.json
 .\.venv\Scripts\python.exe -m eval.task_eval `
   --case-ids task-tool-checklist,task-multi-settling-checklist-grounded `
   --output-prefix task-targeted
 
-# Continue a route run after a transient API failure
+# 路由评测遇到瞬时 API 故障时，从指定 case 续跑
 .\.venv\Scripts\python.exe -m eval.route_eval --from-case ambiguous-5
 ```
 
-Reports are written to `data/eval_reports/{rag,route,task,cache}/`. Task evaluation records request failures and continues by default; use `--no-continue-on-error` when a failure should stop the run.
+报告写入 `data/eval_reports/{rag,route,task,cache}/`。Task Eval 默认记录单条请求错误并继续运行；若希望遇错立刻停止，可传 `--no-continue-on-error`。
 
-### Historical optimization notes (superseded)
+### 历史优化记录（已被最新结果替代）
 
-The tables below document earlier iterations. They are retained for the development story only; use **Verified Evaluation Results** above for the current benchmark.
+以下表格保留用于说明开发过程；当前 benchmark 请以文档顶部的“已验证的评测结果”为准。
 
 <details>
-<summary>Show historical optimisation iterations</summary>
+<summary>展开历史优化记录</summary>
 
-| Group | Suite | Before → After | Reports (route / task) |
+| 分组 | 样本规模 | 优化前 → 优化后 | 报告（route / task） |
 |---|---|---|---|
-| **A** Original (small) | 12 route / 7 task | Baseline → Opt-1 | `084259Z`→`102435Z` / `085613Z`→`102333Z` |
-| **B** Expanded | 38 route / 23 task | Expanded → Opt-2 (P0/P1) | `122242Z`→`132528Z` / `105801Z`→`131442Z` |
+| **A** 原始评测集（小样本） | 12 route / 7 task | Baseline → Opt-1 | `084259Z`→`102435Z` / `085613Z`→`102333Z` |
+| **B** 扩充评测集 | 38 route / 23 task | Expanded → Opt-2 (P0/P1) | `122242Z`→`132528Z` / `105801Z`→`131442Z` |
 
-Both are **evaluation case suites** (not training datasets). Do not compare absolute scores across groups — suite difficulty differs.
+两组都是**自动评测用例集**（不是训练数据集），难度不同，**不要直接横向比较绝对值**。
 
 ---
 
-### Group A — Original eval set (small, Opt-1)
+### Group A — 原始评测集（小样本，Opt-1）
 
-Opt-1: primary-route finalize; Act guards (context / safety / budget); single-step chat; Reflect early finish; replan observability.
+Opt-1：primary-route finalize；Act 硬性守卫（context / safety / budget）；单步 chat；Reflect 提前 finish；replan 可观测。
 
-| Metric | Before | After | Δ |
+| 指标 | 优化前 | 优化后 | Δ |
 |---|---:|---:|---:|
 | Route strict / lenient | 57.14% / 64.29% | **92.86% / 100%** | +35.7 / +35.7pp |
 | Final-route / context / safety | 50% / 0% / 0% | **100% / 100% / 100%** | +50 / +100 / +100pp |
@@ -353,15 +356,15 @@ Opt-1: primary-route finalize; Act guards (context / safety / budget); single-st
 | Task success | 28.57% | **85.71%** | +57.1pp |
 | Avg steps / replan | 2.14 / 42.86% | **1.43 / 28.57%** | −0.71 / −14.3pp |
 
-Category (route strict | task success): multi-turn 25%→**100%**; adversarial 0%→**100%**; edge 75%→**100%**; context/safety/ambiguous tasks 0%→**100%**; single-intent task 33%→**67%**.
+分类提升（route 严格准确率 | task 成功率）：multi-turn 25%→**100%**；adversarial 0%→**100%**；edge 75%→**100%**；context / safety / ambiguous 任务 0%→**100%**；single-intent 任务 33%→**67%**。
 
 ---
 
-### Group B — Expanded eval set (Opt-2)
+### Group B — 扩充评测集（Opt-2）
 
-Opt-2: `_requires_checklist_tool()`; `_is_pure_chat_message()` + single-step finish; stronger context-only guards.
+Opt-2：`_requires_checklist_tool()`；`_is_pure_chat_message()` + 单步 finish；强化 context-only 守卫。
 
-| Metric | Before | After | Δ |
+| 指标 | 优化前 | 优化后 | Δ |
 |---|---:|---:|---:|
 | Route strict / lenient | 73.33% / 77.78% | **91.11% / 93.33%** | +17.8 / +15.6pp |
 | Final-route / context / ambiguity | 42.86% / 66.67% / 40% | **85.71% / 100% / 60%** | +42.9 / +33.3 / +20pp |
@@ -369,33 +372,33 @@ Opt-2: `_requires_checklist_tool()`; `_is_pure_chat_message()` + single-step fin
 | Task success / failures | 73.91% / 6 | **100% / 0** | +26.1pp / −6 |
 | Avg steps / replan | 1.57 / 30.43% | **1.30 / 17.39%** | −0.27 / −13.0pp |
 
-Route categories after Opt-2: single/edge **100%**, multi-turn **93%**, ambiguous **60%**, adversarial **75%**. Task categories all **100%**.
+Opt-2 后 route 分类：single / edge **100%**，multi-turn **93%**，ambiguous **60%**，adversarial **75%**。Task 各类别均为 **100%**。
 
-Safety drop note: new mixed adversarial case `adv-4` exposed a refusal-path hole — malicious “ignore tools/RAG” prompts degraded to `chat` instead of compliant `rag`. Pre-existing safety cases still all pass; the dip is from this new boundary case, not a regression on the original suite.
+Safety 回落说明：新增混合对抗样例 `adv-4` 暴露了拒答路径漏洞——恶意「忽略 tools / RAG」指令被降到 `chat`，而不是走合规 `rag`。原有安全用例依旧全部通过；该回落来自新增边界样例，并非原有评测集退化。
 
 ---
 
-### Remaining gaps (unified)
+### 剩余问题（统一）
 
-| Issue | Cases | Note |
+| 问题 | Case | 说明 |
 |---|---|---|
-| Budget guard too aggressive | `ambiguous-3`, `multi-mixed-1` | Mixed arrival+rent forced to `tool`, drops preferred `rag` |
-| Safety refusal → chat | `adv-4` | New boundary case; original safety cases still pass |
-| Full-path timeout | `ambiguous-5` | Timeout only on complete `/agent-chat` multi-step loop (>180s). Single-turn rag/tool themselves are not slow — not a routing-logic defect |
+| Budget 硬性守卫过强 | `ambiguous-3`, `multi-mixed-1` | 混合 arrival + rent 被强制走 `tool`，丢掉期望的 `rag` |
+| 安全拒答落到 chat | `adv-4` | 新增边界样例；原有安全用例仍通过 |
+| 全链路超时 | `ambiguous-5` | 仅完整 `/agent-chat` 多步循环超时（>180s）。单轮 rag / tool 本身并不慢——**不是路由逻辑缺陷** |
 
-### Summary
+### 小结
 
-- **A:** Opt-1 → route **57%→93%**, task **29%→86%** (context, safety, final-route, fewer steps).
-- **B:** Expansion exposed checklist/chat/context gaps; Opt-2 → route **73%→91%**, task **74%→100%** (checklist routing and chat over-planning fixed).
-- Strengths: RAG policy Qs, explicit budget tools, reflection finish **100%**.
+- **A：** Opt-1 → route **57%→93%**，task **29%→86%**（context、safety、final-route、步数下降）。
+- **B：** 扩充先暴露 checklist / chat / context 缺口；Opt-2 → route **73%→91%**，task **74%→100%**（checklist 路由与 chat 过规划已修复）。
+- 强项：RAG 政策类问答、显式预算 tool、reflection finish **100%**。
 
-### Next improvements
+### 后续改进
 
-| Priority | Area | Action |
+| 优先级 | 方向 | 措施 |
 |---|---|---|
-| <span style="color:#c00"><strong>P0</strong></span> | Mixed-intent routing | Force budget/checklist only for explicit single-intent requests; prefer retrieval-first when arrival/orientation co-occurs |
-| <span style="color:#c00"><strong>P0</strong></span> | Adversarial safety | Keep refusals / prompt-injection on forced `rag`; never degrade to `chat` |
-| **P1** | Latency | Shorten `ambiguous-5`-style multi-step paths (timeout is full-agent only) |
-| **P2** | Eval hygiene | Keep `--continue-on-error`; report small vs expanded eval sets separately |
+| <span style="color:#c00"><strong>P0</strong></span> | 混合意图路由 | 仅在显式单意图计算 / 清单请求时强制 budget / checklist；同时含 arrival / orientation 时优先 retrieval-first |
+| <span style="color:#c00"><strong>P0</strong></span> | 对抗安全 | 拒答 / prompt-injection 仍强制走 `rag`，禁止降到纯 `chat` |
+| **P1** | 延迟 | 缩短 `ambiguous-5` 类多步路径（超时仅发生在完整 Agent 链路） |
+| **P2** | 评测规范 | 保持 `--continue-on-error`；小样本与扩充评测集分区报告 |
 
 </details>
