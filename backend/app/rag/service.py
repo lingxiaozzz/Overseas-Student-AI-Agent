@@ -14,7 +14,7 @@ from app.core.llm import MissingApiKeyError, create_chat_model
 from app.core.prompts import cache_friendly_messages
 from app.core.retry import with_retry
 from app.rag.official_fetch import fetch_official_pages_for_query
-from app.utils.content import content_to_text
+from app.utils.content import content_to_text, response_language_instruction
 
 
 RAG_SYSTEM_PROMPT = """You are an AI assistant for international students in Sydney.
@@ -250,22 +250,24 @@ def _select_language_aware_documents(
     return selected
 
 
-def _append_source_citations(answer: str, sources: list[str]) -> str:
+def _append_source_citations(answer: str, sources: list[str], language: str = "en") -> str:
     """Always expose the source-number mapping even if the model omits inline citations."""
     if not sources:
         return answer.strip()
     source_lines = "\n".join(f"[{index}] {source}" for index, source in enumerate(sources, start=1))
-    return f"{answer.strip()}\n\nSources:\n{source_lines}".strip()
+    label = "参考来源" if language == "zh-CN" else "Sources"
+    return f"{answer.strip()}\n\n{label}:\n{source_lines}".strip()
 
 
 async def generate_rag_response(
-    message: str, chat_history: str = ""
+    message: str, chat_history: str = "", response_language: str | None = None
 ) -> tuple[str, list[str], list[RetrievedContext]]:
     if not settings.google_api_key:
         raise MissingApiKeyError("GOOGLE_API_KEY is not set.")
 
     vector_store = _build_vector_store()
     preferred_language = _query_language(message)
+    language = response_language or preferred_language
     candidates = vector_store.similarity_search_with_score(message, k=_RETRIEVAL_CANDIDATE_K)
     scored_documents = _select_language_aware_documents(
         candidates,
@@ -295,7 +297,7 @@ async def generate_rag_response(
 
     model = create_chat_model(temperature=0.2)
     messages = cache_friendly_messages(
-        RAG_SYSTEM_PROMPT,
+        f"{RAG_SYSTEM_PROMPT}\n\n{response_language_instruction(language)}",
         chat_history,
         f"Question:\n{message}\n\nKnowledge base context:\n{context}{official_block}",
     )
@@ -304,5 +306,5 @@ async def generate_rag_response(
     for context_item in retrieved_contexts:
         if context_item.source not in sources:
             sources.append(context_item.source)
-    answer = _append_source_citations(content_to_text(response.content), sources)
+    answer = _append_source_citations(content_to_text(response.content), sources, language)
     return answer, sources, retrieved_contexts

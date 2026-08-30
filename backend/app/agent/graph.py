@@ -24,6 +24,7 @@ from app.memory.service import (
     upsert_long_term_facts,
     write_experience_memory,
 )
+from app.utils.content import preferred_response_language
 
 Route = Literal["chat", "rag", "tool"]
 ReflectAction = Literal["continue", "replan", "finish"]
@@ -1107,6 +1108,9 @@ async def _execute_node(state: AgentState) -> AgentState:
                     content=action_content,
                     reason=router_reason,
                     tool_call_limit=remaining_tool_calls if route == "tool" else None,
+                    response_language=preferred_response_language(
+                        str(state.get("message", action_content))
+                    ),
                 )
             ),
             timeout=max(_runtime_seconds_remaining(state), 0.001),

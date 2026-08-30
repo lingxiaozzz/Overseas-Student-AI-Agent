@@ -16,3 +16,15 @@ def content_to_text(content: Any) -> str:
         if "content" in content:
             return content_to_text(content["content"])
     return str(content)
+
+
+def preferred_response_language(message: str) -> str:
+    """Choose the response language from the user's original message."""
+    return "zh-CN" if any("\u4e00" <= character <= "\u9fff" for character in message) else "en"
+
+
+def response_language_instruction(language: str | None) -> str:
+    """Return a compact instruction that keeps generated replies language-consistent."""
+    if language == "zh-CN":
+        return "Respond in Simplified Chinese. Keep source citations and source filenames unchanged."
+    return "Respond in English. Keep source citations and source filenames unchanged."

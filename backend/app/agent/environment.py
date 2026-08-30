@@ -37,6 +37,7 @@ class Action:
     content: str
     reason: str = ""
     tool_call_limit: int | None = None
+    response_language: str | None = None
 
 
 @dataclass
@@ -130,17 +131,20 @@ class StudentSupportEnvironment(BaseEnvironment):
             answer, sources, retrieved_contexts = await generate_rag_response(
                 action.content,
                 chat_history=self._chat_history,
+                response_language=action.response_language,
             )
         elif action.type == "tool":
             answer, used_tools = await generate_tool_response(
                 action.content,
                 chat_history=self._chat_history,
                 max_tool_calls=action.tool_call_limit,
+                response_language=action.response_language,
             )
         else:
             answer = await generate_chat_response(
                 action.content,
                 chat_history=self._chat_history,
+                response_language=action.response_language,
             )
 
         self._completed_steps += 1

@@ -7,7 +7,7 @@ from langchain_core.tools import tool
 from app.core.llm import create_chat_model
 from app.core.prompts import cache_friendly_messages
 from app.core.retry import with_retry
-from app.utils.content import content_to_text
+from app.utils.content import content_to_text, preferred_response_language, response_language_instruction
 
 
 TOOL_SYSTEM_PROMPT = """You are an AI assistant for international students in Sydney.
@@ -146,12 +146,18 @@ async def generate_tool_response(
     message: str,
     chat_history: str = "",
     max_tool_calls: int | None = None,
+    response_language: str | None = None,
 ) -> tuple[str, list[str]]:
     base_model = _create_tool_model()
     soft_model = base_model.bind_tools(TOOLS)
     forced_model = base_model.bind_tools(TOOLS, tool_choice="any")
 
-    messages = cache_friendly_messages(TOOL_SYSTEM_PROMPT, chat_history, message)
+    language = response_language or preferred_response_language(message)
+    messages = cache_friendly_messages(
+        f"{TOOL_SYSTEM_PROMPT}\n\n{response_language_instruction(language)}",
+        chat_history,
+        message,
+    )
 
     first_response = await with_retry(lambda: soft_model.ainvoke(messages))
     tool_calls = list(first_response.tool_calls or [])
