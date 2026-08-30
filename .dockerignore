@@ -1,0 +1,15 @@
+.git
+.venv
+backend/.venv
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.env
+data/eval_reports/
+data/memory/
+data/observability/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+coverage/
+htmlcov/

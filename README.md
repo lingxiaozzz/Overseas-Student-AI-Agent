@@ -179,6 +179,22 @@ Also available:
 - `POST /tool-chat`
 - `GET /health`
 
+## Docker and Deployment
+
+The included Docker image serves the API and Chinese web client together. It uses the platform-provided `PORT` when available and exposes `/health` for service checks.
+
+```powershell
+# From the repository root; never add real keys to .env.example.
+Copy-Item .env.example .env
+# Fill GOOGLE_API_KEY and DEEPSEEK_API_KEY in .env.
+docker build -t overseas-student-agent .
+docker run --rm -p 8000:8000 --env-file .env overseas-student-agent
+```
+
+Open `http://127.0.0.1:8000/` and check `http://127.0.0.1:8000/health` returns `{"status":"ok"}`.
+
+For a Render/Railway-style Docker deployment, connect the repository, select the `Dockerfile`, and add `GOOGLE_API_KEY` and `DEEPSEEK_API_KEY` as platform secrets (plus any optional variables from `.env.example`). Do not configure a separate start command: the image already honors `PORT`. To retain long-term memory, run telemetry, and feedback after a redeploy, attach persistent storage at `/app/data`; otherwise these runtime artifacts are intentionally ephemeral.
+
 ## 60-second Demo
 
 Start the API, then run:

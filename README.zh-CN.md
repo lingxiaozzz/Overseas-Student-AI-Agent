@@ -181,6 +181,22 @@ Web Chat MVP：http://127.0.0.1:8000/
 - `POST /tool-chat`
 - `GET /health`
 
+## Docker 与部署
+
+项目内置 Docker 镜像，同时提供 API 与中文网页；部署平台若提供 `PORT` 环境变量会自动使用，并提供 `/health` 健康检查。
+
+```powershell
+# 在仓库根目录执行；不要把真实密钥写入 .env.example。
+Copy-Item .env.example .env
+# 在 .env 中填写 GOOGLE_API_KEY 和 DEEPSEEK_API_KEY。
+docker build -t overseas-student-agent .
+docker run --rm -p 8000:8000 --env-file .env overseas-student-agent
+```
+
+打开 `http://127.0.0.1:8000/`，并确认 `http://127.0.0.1:8000/health` 返回 `{"status":"ok"}`。
+
+部署到 Render / Railway 一类支持 Docker 的平台时：连接仓库、选择根目录 `Dockerfile`，并把 `GOOGLE_API_KEY`、`DEEPSEEK_API_KEY`（以及 `.env.example` 中的可选变量）配置为平台 Secret。镜像已自动读取 `PORT`，无需另填启动命令。如需在重新部署后保留长期记忆、运行日志和反馈数据，请将持久化磁盘挂载到 `/app/data`；否则这些运行时数据会按预期丢失。
+
 ## 60 秒演示
 
 先启动 API，再运行：
