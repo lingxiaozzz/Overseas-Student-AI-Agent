@@ -12,8 +12,8 @@ from pathlib import Path
 from statistics import mean
 from typing import Any
 
-from cache_metrics import fetch_cache_metrics, persist_cache_run
-from dataset_loader import load_cases
+from .cache_metrics import fetch_cache_metrics, persist_cache_run
+from .dataset_loader import load_cases
 
 
 DEFAULT_DATASET = Path(__file__).resolve().parent / "datasets" / "rag_cases.json"

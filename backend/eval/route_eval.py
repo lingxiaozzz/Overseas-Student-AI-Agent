@@ -6,8 +6,8 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cache_metrics import fetch_cache_metrics, persist_cache_run
-from dataset_loader import load_cases
+from .cache_metrics import fetch_cache_metrics, persist_cache_run
+from .dataset_loader import load_cases
 
 ROUTE_ORDER = ["chat", "rag", "tool", "unknown"]
 LENIENT_AMBIGUOUS_THRESHOLD = 0.3

@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from contextvars import ContextVar
 from collections.abc import Iterator
+from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -81,3 +82,16 @@ def create_chat_model(*, temperature: float = 0.0) -> BaseChatModel:
         google_api_key=settings.google_api_key,
         temperature=temperature,
     )
+
+
+def create_structured_output_model(schema: Any, *, temperature: float = 0.0) -> Any:
+    """Create a provider-compatible structured-output model.
+
+    langchain-openai defaults to OpenAI's ``json_schema`` mode. The DeepSeek
+    Chat Completions endpoint supports ``json_object`` instead, exposed by
+    LangChain as ``json_mode``.
+    """
+    model = create_chat_model(temperature=temperature)
+    if resolve_llm_provider() == "deepseek":
+        return model.with_structured_output(schema, method="json_mode")
+    return model.with_structured_output(schema)

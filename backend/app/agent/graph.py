@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from app.agent.environment import Action, Observation, clear_env, get_or_create_env, reset_env
 from app.api.schemas import RetrievedContext
 from app.core.config import settings
-from app.core.llm import create_chat_model
+from app.core.llm import create_structured_output_model
 from app.core.logging import get_logger
 from app.core.prompts import cache_friendly_messages
 from app.core.retry import with_retry
@@ -40,6 +40,11 @@ RAG_HINT_KEYWORDS = {
     "orientation",
     "enrolment",
     "student health cover",
+    "悉尼大学",
+    "出发前",
+    "签证",
+    "住宿",
+    "迎新",
 }
 
 TOOL_HINT_KEYWORDS = {
@@ -49,6 +54,11 @@ TOOL_HINT_KEYWORDS = {
     "estimat",
     "how much",
     "checklist",
+    "预算",
+    "估算",
+    "计算",
+    "清单",
+    "房租",
 }
 
 ROUTER_PROMPT = """You are a routing controller for an international student assistant.
@@ -71,7 +81,8 @@ Few-shot routing examples:
 
 Return strict JSON with:
 - route: one of chat, rag, tool
-- reason: one short sentence explaining the routing choice."""
+- reason: one short sentence explaining the routing choice
+Example: {"route":"rag","reason":"The question needs USYD policy guidance."}"""
 
 PLANNER_PROMPT = """You are a hierarchical planner for an international student assistant.
 Propose soft subgoal hints for the actor. The actor will re-decide each step from fresh observations.
@@ -88,7 +99,8 @@ Rules:
 
 Return strict JSON with:
 - goal: short restatement of the overall goal
-- subgoals: ordered list of 1-4 soft hint strings"""
+- subgoals: ordered list of 1-4 soft hint strings
+Example: {"goal":"Prepare for arrival","subgoals":["Retrieve arrival guidance","Estimate the weekly budget"]}"""
 
 ACTOR_PROMPT = """You are an Observation→Action policy for an international student assistant.
 Given the latest observation, choose exactly ONE next action.
@@ -108,7 +120,8 @@ Rules:
 Return strict JSON with:
 - action_type: one of chat, rag, tool
 - content: executable string for this step
-- reason: one short sentence"""
+- reason: one short sentence
+Example: {"action_type":"rag","content":"Retrieve official arrival guidance","reason":"Facts are needed first."}"""
 
 REFLECTOR_PROMPT = """You are a reflection judge for a hierarchical international-student agent.
 Evaluate whether the latest execution step advances the overall goal.
@@ -131,7 +144,8 @@ Return strict JSON with:
 - progress: number between 0 and 1
 - goal_achieved: boolean
 - missing_info: short string
-- lesson: one short actionable sentence"""
+- lesson: one short actionable sentence
+Example: {"done":true,"next_action":"finish","progress":1.0,"goal_achieved":true,"missing_info":"","lesson":"Retrieved policy guidance before answering."}"""
 
 logger = get_logger(__name__)
 
@@ -237,10 +251,29 @@ class AgentState(TypedDict, total=False):
 
 SAFETY_HINT_KEYWORDS = {
     "fake visa",
+    "fake document",
+    "fake documents",
     "visa shortcut",
     "shortcut",
     "bypass",
     "illegal",
+    "undeclared",
+    "cash-only",
+    "cash only",
+    "cash-in-hand",
+    "unreported",
+    "not report",
+    "evade",
+    "forged",
+    "false document",
+    "false enrolment",
+    "伪造",
+    "假材料",
+    "绕过",
+    "规避",
+    "非法",
+    "瞒报",
+    "打黑工",
     "exploit",
     "evade policy",
 }
@@ -249,8 +282,12 @@ BACKGROUND_ONLY_PREFIXES = (
     "i will",
     "i am",
     "i'm",
+    "i have",
     "my rent is",
     "my budget is",
+    "my student visa",
+    "my oshc",
+    "i have already",
     "i study",
     "i will study",
     "hello",
@@ -259,6 +296,15 @@ BACKGROUND_ONLY_PREFIXES = (
     "hey",
     "thanks",
     "thank you",
+)
+
+BACKGROUND_STATUS_MARKERS = (
+    "already been granted",
+    "already booked",
+    " is active",
+    "已经订好了",
+    "签证也下来了",
+    "安排好了",
 )
 
 BACKGROUND_INTRO_MARKERS = (
@@ -301,12 +347,20 @@ TASK_REQUEST_HINTS = {
     "could you",
     "please",
     "help me",
+    "need help",
     "what should",
     "how do",
     "calculate",
     "estimate",
+    "suggest",
     "plan",
     "checklist",
+    "请",
+    "帮我",
+    "准备",
+    "估算",
+    "计算",
+    "清单",
 }
 
 
@@ -319,6 +373,8 @@ def _is_context_only_message(message: str) -> bool:
     if any(hint in message_lower for hint in TASK_REQUEST_HINTS):
         return False
     if any(message_lower.startswith(prefix) for prefix in BACKGROUND_ONLY_PREFIXES):
+        return True
+    if any(marker in message_lower for marker in BACKGROUND_STATUS_MARKERS):
         return True
     return any(marker in message_lower for marker in BACKGROUND_INTRO_MARKERS)
 
@@ -369,23 +425,69 @@ def _should_prefer_rag_for_onboarding_knowledge(message: str) -> bool:
     onboarding_markers = (
         "arrival",
         "arrive",
+        "arriving",
         "settle",
         "settling",
         "orientation",
         "accommodation",
         "housing",
+        "oshc",
+        "visa",
+        "settled",
+        "悉尼大学",
+        "出发前",
+        "到校",
+        "住宿",
+        "迎新",
     )
     knowledge_request_markers = (
         "prepare",
+        "retrieve",
+        "guidance",
         "plan",
         "settle",
         "what should",
+        "what",
+        "explain",
         "how do",
         "first week",
         "first month",
+        "tell me",
+        "recommend",
+        "need help",
+        "准备",
+        "什么",
+        "怎么",
+        "建议",
     )
-    return any(marker in message_lower for marker in onboarding_markers) and any(
+    has_onboarding_knowledge_request = any(marker in message_lower for marker in onboarding_markers) and any(
         marker in message_lower for marker in knowledge_request_markers
+    )
+    # Compact inputs such as "USYD OSHC + checklist" express a factual policy
+    # question and a generation request even though they omit a full sentence.
+    has_oshc_checklist_combo = "oshc" in message_lower and "checklist" in message_lower
+    return has_onboarding_knowledge_request or has_oshc_checklist_combo
+
+
+def _checklist_needs_factual_grounding(message: str) -> bool:
+    """Whether a checklist request also explicitly asks for factual guidance."""
+    message_lower = message.strip().lower()
+    factual_markers = (
+        "tell me",
+        "what ",
+        "explain",
+        "recommend",
+        "options",
+        "guidance",
+        "policy",
+        "+",
+        "什么",
+        "怎么",
+        "介绍",
+        "建议",
+    )
+    return _should_prefer_rag_for_onboarding_knowledge(message) and any(
+        marker in message_lower for marker in factual_markers
     )
 
 
@@ -402,7 +504,7 @@ def _requires_checklist_tool(message: str) -> bool:
     message_lower = message.strip().lower()
     if not message_lower or _is_context_only_message(message):
         return False
-    has_checklist_signal = "checklist" in message_lower
+    has_checklist_signal = "checklist" in message_lower or "清单" in message_lower
     has_build_signal = any(
         phrase in message_lower
         for phrase in ("build a", "build my", "create a", "generate a", "make a")
@@ -438,9 +540,9 @@ def _requires_budget_tool(message: str) -> bool:
         return False
     has_budget_intent = any(
         token in message_lower
-        for token in ("budget", "cost", "calculate", "estimate", "how much")
+        for token in ("budget", "cost", "calculate", "estimate", "how much", "预算", "估算", "计算")
     )
-    has_budget_signal = has_budget_intent or "rent" in message_lower
+    has_budget_signal = has_budget_intent or "rent" in message_lower or "房租" in message_lower
     has_request_signal = ("?" in message_lower) or any(
         hint in message_lower for hint in TASK_REQUEST_HINTS
     )
@@ -504,7 +606,7 @@ def _execution_budget_stop_reason(state: AgentState) -> str:
 
 
 async def _llm_route(message: str, chat_history: str) -> RouterDecision:
-    model = create_chat_model(temperature=0).with_structured_output(RouterDecision)
+    model = create_structured_output_model(RouterDecision, temperature=0)
     messages = cache_friendly_messages(ROUTER_PROMPT, chat_history, message)
     return await with_retry(lambda: model.ainvoke(messages))
 
@@ -540,10 +642,13 @@ async def _decide_route(message: str, chat_history: str, trace_id: str) -> Route
             f"trace_id={trace_id} route_decision={decision.route} reason={decision.reason}"
         )
         return decision
-    except Exception:
+    except Exception as exc:
         fallback_route = _keyword_route(message)
-        logger.warning(
-            f"trace_id={trace_id} route_fallback={fallback_route} reason=llm_router_unavailable"
+        logger.exception(
+            "trace_id=%s route_fallback=%s reason=llm_router_unavailable error=%s",
+            trace_id,
+            fallback_route,
+            type(exc).__name__,
         )
         return RouterDecision(
             route=fallback_route,
@@ -557,7 +662,7 @@ async def _llm_plan(
     experience_context: str,
     long_term_context: str,
 ) -> PlanDecision:
-    model = create_chat_model(temperature=0).with_structured_output(PlanDecision)
+    model = create_structured_output_model(PlanDecision, temperature=0)
     messages = cache_friendly_messages(
         PLANNER_PROMPT,
         chat_history,
@@ -642,11 +747,22 @@ async def _plan_node(state: AgentState) -> AgentState:
         "memory_writes": memory_writes,
     }
 
-    # Keep trivial context-only and pure-chat turns as single-step plans.
-    if _is_context_only_message(message) or _is_pure_chat_message(message):
+    # Keep one-action requests compact. Safety and a standalone checklist are
+    # executable in one step; asking the planner to invent extra subgoals only
+    # increases the chance of missing the required action.
+    standalone_checklist = (
+        _requires_checklist_tool(message)
+        and not _checklist_needs_factual_grounding(message)
+    )
+    if (
+        _is_context_only_message(message)
+        or _is_pure_chat_message(message)
+        or _should_force_rag_for_safety(message)
+        or standalone_checklist
+    ):
         goal = message
         subgoals = [message]
-        plan_mode = "single_context" if _is_context_only_message(message) else "pure_chat"
+        plan_mode = "single_context" if _is_context_only_message(message) else "single_action"
         logger.trace(f"trace_id={trace_id} plan_mode={plan_mode} subgoals=1")
         return {
             "goal": goal,
@@ -683,11 +799,13 @@ async def _plan_node(state: AgentState) -> AgentState:
             plan = await _llm_plan(message, chat_history, experience_context, long_term_context)
             goal = plan.goal.strip() or message
             subgoals = _normalize_subgoals(message, plan)
-        except Exception:
+        except Exception as exc:
             goal = message
             subgoals = [message]
-            logger.warning(
-                f"trace_id={trace_id} plan_fallback=single_step reason=llm_planner_unavailable"
+            logger.exception(
+                "trace_id=%s plan_fallback=single_step reason=llm_planner_unavailable error=%s",
+                trace_id,
+                type(exc).__name__,
             )
 
     # Keep environment goal aligned with planner restatement.
@@ -742,7 +860,7 @@ async def _llm_next_action(
         for item in step_results
     ) or "- none"
     unused_hints = hints[hint_index:]
-    model = create_chat_model(temperature=0).with_structured_output(NextActionDecision)
+    model = create_structured_output_model(NextActionDecision, temperature=0)
     extras = observation.extras or {}
     messages = cache_friendly_messages(
         ACTOR_PROMPT,
@@ -856,22 +974,43 @@ async def _act_node(state: AgentState) -> AgentState:
         forced_action_type = original_action_type
         # Hard guards (order matters):
         # 1) Pure chat / context-only inputs stay chat.
-        # 2) Safety-sensitive and onboarding-knowledge inputs stay rag.
-        # 3) Explicit checklist / budget requests stay tool.
-        # 4) Remaining ambiguous onboarding plans prefer rag.
-        if _is_pure_chat_message(user_message):
+        # 2) Complete required capabilities in a stable order: safety / factual
+        #    grounding first, then an explicitly requested tool. This prevents
+        #    a tool-first action from ending a mixed request prematurely.
+        # 3) For remaining steps, use the current action content.
+        completed_routes = {str(item.get("route", "")) for item in step_results}
+        all_used_tools = {
+            tool_name
+            for item in step_results
+            for tool_name in list(item.get("used_tools", []))
+        }
+        needs_grounding = _should_prefer_rag_for_onboarding_knowledge(user_message)
+        needs_checklist = _requires_checklist_tool(user_message)
+        needs_budget = _requires_budget_tool(user_message)
+        checklist_needs_grounding = _checklist_needs_factual_grounding(user_message)
+        if _should_force_rag_for_safety(user_message):
+            forced_action_type = "rag"
+        elif _is_pure_chat_message(user_message):
             forced_action_type = "chat"
         elif current_step == 0 and _is_context_only_message(user_message):
             forced_action_type = "chat"
-        elif _should_force_rag_for_safety(user_message):
-            forced_action_type = "rag"
-        elif _should_prefer_rag_for_onboarding_knowledge(user_message):
-            forced_action_type = "rag"
-        elif _requires_checklist_tool(user_message):
+        elif needs_checklist and not checklist_needs_grounding and "build_prearrival_checklist" not in all_used_tools:
             forced_action_type = "tool"
-        elif _requires_budget_tool(user_message):
+        elif needs_grounding and "rag" not in completed_routes:
+            forced_action_type = "rag"
+        elif needs_checklist and "build_prearrival_checklist" not in all_used_tools:
             forced_action_type = "tool"
-        elif _should_prefer_rag_for_ambiguous_plan(user_message):
+        elif needs_budget and "estimate_weekly_budget" not in all_used_tools:
+            forced_action_type = "tool"
+        elif needs_grounding:
+            forced_action_type = "rag"
+        elif _should_prefer_rag_for_onboarding_knowledge(content):
+            forced_action_type = "rag"
+        elif _requires_checklist_tool(content):
+            forced_action_type = "tool"
+        elif _requires_budget_tool(content):
+            forced_action_type = "tool"
+        elif _should_prefer_rag_for_ambiguous_plan(content):
             forced_action_type = "rag"
 
         action_type = forced_action_type
@@ -886,9 +1025,14 @@ async def _act_node(state: AgentState) -> AgentState:
                 reason = f"action_forced_by_rules (route={forced_action_type}); {reason}"
 
         decision = NextActionDecision(action_type=action_type, content=content, reason=reason)
-    except Exception:
+    except Exception as exc:
         decision, source = await _fallback_next_action(state, observation, source="hint_fallback")
-        logger.warning(f"trace_id={trace_id} act_fallback={source} reason=llm_actor_unavailable")
+        logger.exception(
+            "trace_id=%s act_fallback=%s reason=llm_actor_unavailable error=%s",
+            trace_id,
+            source,
+            type(exc).__name__,
+        )
 
     if (
         decision.action_type == "tool"
@@ -1209,6 +1353,16 @@ def _apply_reflect_guards(state: AgentState, decision: ReflectionDecision) -> Re
         next_action = "finish"
         done = True
         progress = 1.0
+    elif (
+        _should_force_rag_for_safety(user_message)
+        and last_answer.strip()
+        and any(str(item.get("route", "")) == "rag" for item in step_results)
+    ):
+        # A grounded safe refusal is complete once. Further steps cannot make
+        # a harmful request more satisfiable and only create repetition.
+        next_action = "finish"
+        done = True
+        progress = 1.0
     elif _is_pure_chat_message(user_message) and last_answer.strip() and current_step >= 1:
         next_action = "finish"
         done = True
@@ -1251,7 +1405,7 @@ async def _llm_reflect(state: AgentState) -> ReflectionDecision:
     latest = step_results[-1] if step_results else {}
     hints = _plan_hints(state)
     observation = state.get("last_observation", {})
-    model = create_chat_model(temperature=0).with_structured_output(ReflectionDecision)
+    model = create_structured_output_model(ReflectionDecision, temperature=0)
     messages = cache_friendly_messages(
         REFLECTOR_PROMPT,
         str(state.get("chat_history", "")),
@@ -1281,10 +1435,14 @@ async def _reflect_node(state: AgentState) -> AgentState:
     try:
         decision = await _llm_reflect(state)
         decision = _apply_reflect_guards(state, decision)
-    except Exception:
+    except Exception as exc:
         judge_source = "rule_fallback"
         decision = _rule_reflect(state)
-        logger.warning(f"trace_id={trace_id} reflect_fallback=rule reason=llm_reflect_unavailable")
+        logger.exception(
+            "trace_id=%s reflect_fallback=rule reason=llm_reflect_unavailable error=%s",
+            trace_id,
+            type(exc).__name__,
+        )
 
     logger.trace(
         f"trace_id={trace_id} reflect_action={decision.next_action} progress={decision.progress:.2f} "
@@ -1316,10 +1474,14 @@ async def _replan_node(state: AgentState) -> AgentState:
         )
         new_subgoals = _normalize_subgoals(message, plan)[:remaining_budget]
         goal = plan.goal.strip() or state.get("goal", message)
-    except Exception:
+    except Exception as exc:
         new_subgoals = [message]
         goal = state.get("goal", message)
-        logger.warning(f"trace_id={trace_id} replan_fallback=single_step")
+        logger.exception(
+            "trace_id=%s replan_fallback=single_step error=%s",
+            trace_id,
+            type(exc).__name__,
+        )
 
     completed = state.get("current_step", 0)
     next_replan_round = int(state.get("replan_round", 0)) + 1
@@ -1575,10 +1737,17 @@ async def _evaluate_node(state: AgentState) -> AgentState:
     already_replanned = bool(state.get("replanned", False))
     previously_triggered = bool(state.get("evaluation_triggered_replan", False))
     user_message = str(state.get("message", state.get("goal", "")))
+    has_grounded_answer = _should_prefer_rag_for_onboarding_knowledge(user_message) and any(
+        str(item.get("route", "")) == "rag" for item in step_results
+    )
     triggered_replan = (
         (not decision.passed)
         and (not already_replanned)
         and not _is_pure_chat_message(user_message)
+        and not has_grounded_answer
+        # A safe refusal may deliberately fail an evaluator that follows the
+        # user's harmful wording. Do not spend extra steps trying to satisfy it.
+        and not _should_force_rag_for_safety(user_message)
     )
     next_action: Literal["finalize", "replan"] = "replan" if triggered_replan else "finalize"
 

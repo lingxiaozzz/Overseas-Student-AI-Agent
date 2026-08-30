@@ -3,7 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
-from app.core.llm import create_chat_model
+from app.core.llm import create_structured_output_model
 from app.core.prompts import cache_friendly_messages
 from app.core.retry import with_retry
 
@@ -25,6 +25,7 @@ Return strict JSON with:
 - score: float between 0 and 1
 - passed: boolean
 - feedback: one short sentence explaining the score
+Example: {"score":0.8,"passed":true,"feedback":"The answer covers the required actions."}
 """
 
 
@@ -92,7 +93,7 @@ def rule_evaluate(
 
 
 async def llm_evaluate(goal: str, answer: str, plan_summary: str = "") -> EvaluationDecision:
-    model = create_chat_model(temperature=0).with_structured_output(EvaluationDecision)
+    model = create_structured_output_model(EvaluationDecision, temperature=0)
     messages = cache_friendly_messages(
         EVALUATOR_PROMPT,
         "",

@@ -53,7 +53,10 @@ def load_cases(path_value: str, *, suite: DatasetSuite) -> list[dict[str, Any]]:
         elif suite == "task":
             if not isinstance(case.get("message"), str) or not case["message"].strip():
                 raise ValueError(f"Task case '{case_id}' needs a non-empty message.")
-            if "expected_final_route" not in case and "expected_routes_any" not in case:
+            if not any(
+                key in case
+                for key in ("expected_final_route", "expected_routes_any", "expected_routes_all")
+            ):
                 raise ValueError(f"Task case '{case_id}' needs an expected route.")
         else:
             if not isinstance(case.get("message"), str) or not case["message"].strip():

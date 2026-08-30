@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from statistics import mean
 
-from cache_metrics import fetch_cache_metrics, persist_cache_run
-from dataset_loader import load_cases
+from .cache_metrics import fetch_cache_metrics, persist_cache_run
+from .dataset_loader import load_cases
 
 
 DEFAULT_CASES_FILE = Path(__file__).resolve().parent / "datasets" / "task_cases.json"
@@ -65,6 +65,9 @@ def evaluate_case(case: dict, response: dict) -> dict:
     if "expected_routes_any" in case:
         expected_any = set(case["expected_routes_any"])
         checks["routes_any"] = bool(expected_any.intersection(step_routes or [final_route]))
+    if "expected_routes_all" in case:
+        expected_all = set(case["expected_routes_all"])
+        checks["routes_all"] = expected_all.issubset(set(step_routes or [final_route]))
 
     required_tools = case.get("require_tools", [])
     checks["tools"] = set(required_tools).issubset(set(used_tools))
@@ -116,24 +119,66 @@ def main() -> None:
         default="",
         help="Optional versioned task dataset JSON. Defaults to datasets/task_cases.json.",
     )
+    parser.add_argument(
+        "--case-ids",
+        default="",
+        help="Comma-separated task case ids for a targeted run. Does not overwrite task-latest.json.",
+    )
+    parser.add_argument(
+        "--continue-on-error",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Record failed API requests and continue the run (default: true).",
+    )
+    parser.add_argument(
+        "--from-case",
+        default="",
+        help="Resume from a task case id. Earlier cases are skipped.",
+    )
     args = parser.parse_args()
+    is_targeted_run = bool(args.case_ids.strip() or args.from_case.strip())
 
     dataset_file = args.cases_file or str(DEFAULT_CASES_FILE)
     cases = load_cases(dataset_file, suite="task")
+    selected_case_ids = [case_id.strip() for case_id in args.case_ids.split(",") if case_id.strip()]
+    if selected_case_ids:
+        available_case_ids = {case["id"] for case in cases}
+        unknown_case_ids = [case_id for case_id in selected_case_ids if case_id not in available_case_ids]
+        if unknown_case_ids:
+            parser.error(f"Unknown task case id(s): {', '.join(unknown_case_ids)}")
+        selected_ids = set(selected_case_ids)
+        cases = [case for case in cases if case["id"] in selected_ids]
+    if args.from_case:
+        case_ids = [case["id"] for case in cases]
+        if args.from_case not in case_ids:
+            parser.error(f"Unknown task case id: {args.from_case}")
+        start_index = case_ids.index(args.from_case)
+        cases = cases[start_index:]
+        print(f"Resuming from case {args.from_case} ({len(cases)} cases remaining)")
     cache_metrics_before = fetch_cache_metrics(args.base_url)
     endpoint = f"{args.base_url.rstrip('/')}/agent-chat"
     results: list[dict] = []
+    request_errors: list[dict[str, str]] = []
 
     for index, case in enumerate(cases, start=1):
         case_id = case["id"]
         session_id = f"{args.session_prefix}-{case_id}"
         print(f"[{index}/{len(cases)}] Running {case_id}...")
-        response = post_json(
-            endpoint,
-            {"message": case["message"], "session_id": session_id},
-            headers={"x-trace-id": f"task-{case_id}"},
-        )
-        results.append(evaluate_case(case, response))
+        try:
+            response = post_json(
+                endpoint,
+                {"message": case["message"], "session_id": session_id},
+                headers={"x-trace-id": f"task-{case_id}"},
+            )
+            results.append(evaluate_case(case, response))
+        except (TimeoutError, RuntimeError, urllib.error.URLError) as exc:
+            if not args.continue_on_error:
+                raise
+            print(f"  WARNING: request failed for {case_id}: {exc}")
+            failed_result = evaluate_case(case, {})
+            failed_result["request_error"] = str(exc)
+            results.append(failed_result)
+            request_errors.append({"case_id": case_id, "message": str(exc)})
 
     successes = [item for item in results if item["success"]]
     task_success_rate = len(successes) / len(results) if results else 0.0
@@ -174,6 +219,7 @@ def main() -> None:
     print(f"- Memory hit rate: {memory_hit_rate:.2%}")
     print(f"- Evaluation pass rate: {evaluation_pass_rate:.2%}")
     print(f"- Avg evaluation score: {avg_evaluation_score:.2f}")
+    print(f"- Request errors/timeouts: {len(request_errors)}")
     for name, stats in category_metrics.items():
         print(f"- {name}: success={stats['success_rate']:.2%} ({stats['total']} tasks)")
     if failures:
@@ -199,13 +245,15 @@ def main() -> None:
         "memory_hit_rate": memory_hit_rate,
         "evaluation_pass_rate": evaluation_pass_rate,
         "avg_evaluation_score": avg_evaluation_score,
+        "request_errors": request_errors,
         "category_metrics": category_metrics,
         "failures": failures,
         "results": results,
         "cases": cases,
     }
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
-    latest_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    if not is_targeted_run:
+        latest_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     cache_report_path = persist_cache_run(
         suite="task",
         base_url=args.base_url,
@@ -213,7 +261,8 @@ def main() -> None:
         after=fetch_cache_metrics(args.base_url),
     )
     print(f"\nReport saved: {report_path}")
-    print(f"Latest report: {latest_path}")
+    if not is_targeted_run:
+        print(f"Latest report: {latest_path}")
     if cache_report_path:
         print(f"Cache summary saved: {cache_report_path}")
 
